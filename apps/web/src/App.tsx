@@ -20,6 +20,8 @@ const Admin = lazy(() => import('./pages/Admin'));
 const Twin = lazy(() => import('./pages/Twin'));
 const Registry = lazy(() => import('./pages/Registry'));
 const Model = lazy(() => import('./pages/Model'));
+const Port = lazy(() => import('./pages/Port'));
+const DataRegister = lazy(() => import('./pages/DataRegister'));
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const { session, loading } = useAuth();
@@ -55,6 +57,7 @@ function NotFound() {
 
 const REGISTRY_ROLES: Role[] = ['port_controller', 'weighbridge_operator', 'auditor', 'regulator_readonly'];
 const ANALYSIS_ROLES: Role[] = ['port_controller', 'auditor', 'regulator_readonly'];
+const PORT_ROLES: Role[] = ['port_controller', 'weighbridge_operator', 'transporter_admin', 'dispatcher', 'cargo_owner', 'auditor'];
 
 export default function App() {
   return (
@@ -77,6 +80,8 @@ export default function App() {
               <Route path="/warehouse" element={<RequireRole roles={['warehouse_manager']}><Warehouse /></RequireRole>} />
               <Route path="/registry" element={<RequireRole roles={REGISTRY_ROLES}><Registry /></RequireRole>} />
               <Route path="/model" element={<RequireRole roles={ANALYSIS_ROLES}><Model /></RequireRole>} />
+              <Route path="/port" element={<RequireRole roles={PORT_ROLES}><Port /></RequireRole>} />
+              <Route path="/data" element={<RequireRole roles={[]}><DataRegister /></RequireRole>} />
               <Route path="/admin" element={<RequireRole roles={['platform_admin']}><Admin /></RequireRole>} />
               <Route path="/twin" element={<RequireRole roles={['port_controller', 'weighbridge_operator', 'auditor', 'regulator_readonly', 'transporter_admin', 'dispatcher']}><Twin /></RequireRole>} />
               <Route path="*" element={<NotFound />} />

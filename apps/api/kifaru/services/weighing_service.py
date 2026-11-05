@@ -295,6 +295,14 @@ def process_lane_pass(
                                                "gvm_kg": issued_token.gvm_kg, "expires_at": issued_token.expires_at.isoformat(), "weighing_event_id": ev.id},
                           station_id=lane.station_id, producer="clearance-registry", occurred_at=occurred_at)
 
+    # SmartPort stage 7: a pass over the port gate-out node advances the vehicle's active port visit from loaded to weighed
+    port_visit = None
+    if node_kind == "port_gateout" and vehicle is not None:
+        from . import port_visits as port_svc
+
+        port_visit = port_svc.attach_port_weighing(db, vehicle.id, ev, (issued_token.token_ref if issued_token else (token_row.token_ref if token_row else None)),
+                                                   _lane_calibration_valid(lane, occurred_at), vehicle.tare_kg, occurred_at)
+
     ticket = tickets.issue(db, ev, dec, "prescreen", vehicle.plate if vehicle else anpr_plate, station_code)
 
     ledger.append(
@@ -327,6 +335,7 @@ def process_lane_pass(
         "token_ref": (issued_token.token_ref if issued_token else (token_row.token_ref if token_row else None)),
         "token_issued": issued_token.token_ref if issued_token else None,
         "token_checked": token_row.token_ref if token_row else None,
+        "port_visit": port_visit.reference if port_visit else None,
         "plate": vehicle.plate if vehicle else anpr_plate,
         "vehicle_id": vehicle.id if vehicle else None,
         "shipment_id": shipment.id if shipment else None,

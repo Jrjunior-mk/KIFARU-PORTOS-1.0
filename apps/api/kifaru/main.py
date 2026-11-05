@@ -15,11 +15,13 @@ from .routers import (
     admin,
     auth,
     backhaul,
+    data,
     environment,
     events_api,
     fleet,
     integrations,
     notifications,
+    port,
     queue,
     rcs,
     shipments,
@@ -83,7 +85,7 @@ def create_app() -> FastAPI:
         return JSONResponse({"detail": "Internal server error"}, status_code=500)
 
     prefix = "/api/v1"
-    for r in (auth, fleet, stations, weighing, tickets, shipments, queue, backhaul, notifications, environment, integrations, admin, events_api, rcs):
+    for r in (auth, fleet, stations, weighing, tickets, shipments, queue, backhaul, notifications, environment, integrations, admin, events_api, rcs, port, data):
         app.include_router(r.router, prefix=prefix)
     app.include_router(ws.router)
 

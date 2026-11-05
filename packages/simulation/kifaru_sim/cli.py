@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import sys
 from dataclasses import fields
+from pathlib import Path
 
 from . import scenarios as scn
 from .model import SimConfig
@@ -163,6 +164,12 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--hours", type=float, default=12.0)
     s.add_argument("--seed", type=int, default=1000)
     s.add_argument("--set", action="append", default=[])
+    po = sub.add_parser("port", help="SmartPort port-process model: existing operations vs SmartPort (SimPy, modelled)")
+    po.add_argument("--reps", type=int, default=3)
+    po.add_argument("--hours", type=float, default=24.0)
+    po.add_argument("--seed", type=int, default=1)
+    po.add_argument("--set", action="append", default=[], help="override a PortSimConfig field, key=value")
+    po.add_argument("--out", default=None, help="write the Markdown table to this file")
     v2 = sub.add_parser("v2", help="RCS v2 chain model: Section 9 tables (Monte Carlo, modelled)")
     _add_v2_common(v2)
     v2.add_argument("--out", default=None, help="directory for the Markdown report")
@@ -183,6 +190,26 @@ def main(argv: list[str] | None = None) -> int:
     v2g.add_argument("--json", action="store_true")
     a = p.parse_args(argv)
 
+    if a.cmd == "port":
+        from dataclasses import fields as _fields
+
+        from .port_process import PortSimConfig, table_markdown
+        from .port_process import compare as port_compare
+
+        types = {f.name: f.type for f in _fields(PortSimConfig)}
+        kw: dict = {"reps": a.reps, "hours": a.hours, "seed": a.seed}
+        for item in a.set:
+            k, v = item.split("=", 1)
+            if k not in types:
+                raise SystemExit(f"unknown PortSimConfig field {k}")
+            t = str(types[k])
+            kw[k] = (v.lower() in ("1", "true", "yes")) if "bool" in t else int(v) if t == "int" else float(v)
+        md = "# SmartPort port-process comparison (modelled)\n\n" + table_markdown(port_compare(PortSimConfig(**kw)))
+        if a.out:
+            Path(a.out).write_text(md, encoding="utf-8")
+            print(f"written: {a.out}", file=sys.stderr)
+        print(md)
+        return 0
     if a.cmd == "v2":
         return _run_v2(a)
     if a.cmd == "v2-sweep":

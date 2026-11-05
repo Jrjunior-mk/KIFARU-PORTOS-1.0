@@ -3,7 +3,8 @@ import { useEffect, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { rcs as rcsApi } from '../api/endpoints';
 import type { RcsModelIn, RcsModelOut, RcsSweepOut } from '../api/types';
-import { Badge, Card, ErrorBanner, Field, Notice, PageHeader, Skeleton, Stat, Table } from '../components/ui';
+import { Badge, Card, ErrorBanner, Field, Notice, PageHeader, Skeleton, Stat, Table, Tabs } from '../components/ui';
+import PortSim from './PortSim';
 import { useMutation } from '../hooks/useQuery';
 import { chartTheme, useDarkMode } from '../lib/chart';
 import { fmtNum } from '../lib/format';
@@ -17,6 +18,17 @@ export const MODEL_DEFAULTS: RcsModelIn = {
 const C = { base: '#64748b', allow: '#a855f7', road: '#0d9488', port: '#d97706', lane: '#2563eb', stat: '#dc2626' };
 
 export default function Model() {
+  const [tab, setTab] = useState<'chain' | 'port'>('chain');
+  return (
+    <div className="space-y-4">
+      <PageHeader eyebrow="Analysis · modelled" title="Model explorer" subtitle="Two models: the RCS v2 clearance chain (Monte Carlo) and the SmartPort port process (discrete-event, existing versus SmartPort). Everything here is modelled." actions={<Badge tone="violet">MODELLED</Badge>} />
+      <Tabs value={tab} onChange={setTab} tabs={[{ id: 'chain', label: 'RCS v2 clearance chain' }, { id: 'port', label: 'Port process: existing vs SmartPort' }]} />
+      {tab === 'chain' ? <ChainModel /> : <PortSim />}
+    </div>
+  );
+}
+
+function ChainModel() {
   const [form, setForm] = useState<RcsModelIn>(MODEL_DEFAULTS);
   const run = useMutation((b: RcsModelIn) => rcsApi.model(b));
   const sweepLoad = useMutation((b: RcsModelIn) => rcsApi.sweep({ factor: 'avg_loading_pct', values: [75, 80, 85, 90], base: b }));
@@ -31,7 +43,6 @@ export default function Model() {
 
   return (
     <div className="space-y-4">
-      <PageHeader eyebrow="Analysis · modelled" title="RCS v2 Model Explorer" subtitle="Monte Carlo of the clearance chain for port, origin and untokened trucks. Reproduces the plan's Section 9 tables and lets you move every assumption." actions={<Badge tone="violet">MODELLED</Badge>} />
       <Notice tone="warn">All figures are Monte Carlo estimates under the stated assumptions. They are not measurements and must be replaced with baseline data (weighbridge logs, gate timestamps, classification counts) before any saving is claimed.</Notice>
       <div className="grid gap-4 xl:grid-cols-[22rem_1fr]">
         <Card title="Assumptions" subtitle="POST /rcs/model" actions={<button className="btn-primary text-xs" disabled={busy} onClick={() => void go()}>{busy ? 'Running…' : 'Run model'}</button>}>

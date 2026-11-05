@@ -17,6 +17,29 @@ const CHECKPOINTS = [
   { el: 'Clearance registry', where: 'Cloud, with edge caches at each site', job: 'One record per truck-journey: tokens, weights, dimensions, certificates, permits, release orders, demerit points, release status.' },
 ];
 
+const WORKFLOW = [
+  { n: 1, t: 'Pre-arrival registration and scheduling', who: 'Transporter / clearing agent', d: 'Truck, driver, cargo and container details submitted; collection appointment booked; documents prepared before the truck arrives.' },
+  { n: 2, t: 'Customs clearance and document verification', who: 'KRA, KenTrade, KEBS', d: 'Declarations, duties, permits and standards certificates verified; cargo marked cleared, pending or held.' },
+  { n: 3, t: 'Truck arrival and identification', who: 'KPA', d: 'RFID and ANPR identify the truck at the approach; appointment and cargo details verified; queue position recorded.' },
+  { n: 4, t: 'Gate-in and security inspection', who: 'KPA', d: 'Access authorisation, vehicle and driver checks; gate-in time recorded.' },
+  { n: 5, t: 'Yard allocation and cargo location', who: 'KPA', d: 'Terminal, yard block and container position assigned; loading instruction issued.' },
+  { n: 6, t: 'Cargo verification and loading', who: 'KPA', d: 'Container number matched to the collection documents; crane or reach stacker loads; seal and condition recorded.' },
+  { n: 7, t: 'Automated weighing and weight verification', who: 'KPA + KeNHA', d: 'The port gate-out weigh node records gross and axle weights, compares them with the declaration and the legal limits and issues the Load Compliance Token.' },
+  { n: 8, t: 'Final cargo and document verification', who: 'KPA', d: 'Release status, delivery order, gate pass and payments confirmed; holds resolved.' },
+  { n: 9, t: 'Gate-out and port departure', who: 'KPA', d: 'Exit verification by RFID or ANPR; gate-out time recorded and port dwell time computed.' },
+  { n: 10, t: 'Inland transportation and cargo tracking', who: 'Transporters, telematics, KeNHA weighbridges', d: 'GPS tracking to Nairobi, Nakuru, Kisumu or Eldoret; stops, deviations and delays recorded; weighbridges honour the token.' },
+  { n: 11, t: 'Cargo delivery and trip closure', who: 'Cargo owner / warehouse', d: 'Proof of delivery recorded; trip closed; total transit time computed.' },
+];
+
+const AGENCIES = [
+  { a: 'Kenya Ports Authority (KPA)', r: 'Manages the Port of Mombasa: entry and exit, cargo handling, container storage, terminal operations and port infrastructure.' },
+  { a: 'Kenya Revenue Authority (KRA)', r: 'Customs declarations, duty collection, cargo inspections, customs compliance and cargo release.' },
+  { a: 'Kenya Trade Network Agency (KenTrade)', r: 'Operates the Kenya TradeNet National Electronic Single Window for electronic trade documents, permits, approvals and information exchange between agencies.' },
+  { a: 'Kenya National Highways Authority (KeNHA)', r: 'Manages national highways, axle-load compliance and weighbridge operations.' },
+  { a: 'National Transport and Safety Authority (NTSA)', r: 'Motor vehicle registration, roadworthiness, licensing and road transport safety.' },
+  { a: 'Kenya Bureau of Standards (KEBS)', r: 'Ensures goods meet the required standards (pre-export verification and standardisation marks).' },
+];
+
 const RULES = [
   { where: 'Port', result: 'GREEN', cond: 'Identity and releases valid, gross and axle-group loads below the limit after the margin, measured and expected weight within tolerance. Token issued.' },
   { where: 'Port', result: 'AMBER', cond: 'Near the limit or weight variance too large. Re-weigh in the port, correct if needed.' },
@@ -108,6 +131,30 @@ export default function About() {
             </table>
           </div>
           <p className="mt-3 text-sm text-ink-600 dark:text-slate-300">For loads in the margin band, the road reading no longer has to be accurate against the limit. It only has to confirm that the weight is unchanged since the port, which is a much easier test. Random audits send about 3 % of mainline greens through the lane at first, falling toward 1–2 % as trust builds.</p>
+        </section>
+
+        <section>
+          <h2 className="text-xl font-semibold">The port process: eleven stages from pre-arrival to delivery</h2>
+          <p className="mt-1 text-sm text-ink-600 dark:text-slate-300">The SmartPort layer connects every stage of a truck's visit through one record and one shared dashboard, so each agency sees the status it needs without repeated paperwork. The port gate-out weigh node is stage 7.</p>
+          <ol className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {WORKFLOW.map((w) => (
+              <li key={w.n} className="card flex gap-3 p-3">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-600 text-sm font-bold text-white">{w.n}</span>
+                <div className="min-w-0"><div className="font-semibold leading-tight">{w.t}</div><div className="text-[11px] uppercase tracking-wide text-brand-700 dark:text-brand-300">{w.who}</div><p className="mt-1 text-xs text-ink-600 dark:text-slate-300">{w.d}</p></div>
+              </li>
+            ))}
+          </ol>
+        </section>
+
+        <section>
+          <h2 className="text-xl font-semibold">Agencies and how they share data</h2>
+          <div className="card mt-4 overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead><tr><th className="th">Agency</th><th className="th">Main responsibilities</th></tr></thead>
+              <tbody>{AGENCIES.map((x) => <tr key={x.a} className="tr"><td className="td font-medium">{x.a}</td><td className="td">{x.r}</td></tr>)}</tbody>
+            </table>
+          </div>
+          <p className="mt-3 text-sm text-ink-600 dark:text-slate-300">Agencies share information mainly through digital platforms, electronic documents and direct communication. KenTrade's TradeNet single window lets importers and clearing agents submit trade documents once; KRA, KEBS and other regulators use that information to verify cargo and communicate clearance decisions, while KPA manages port operations and truck entry and exit. The platform connects the relevant status from these systems into one dashboard, showing whether cargo is cleared, whether a truck may enter or leave, loading and weighing records, truck location and any holds or delays. It complements the agencies' systems through authorised data sharing rather than replacing them. Every figure it holds is classified as actual, published, estimated or simulated in the data register.</p>
         </section>
 
         <section className="grid gap-4 sm:grid-cols-3">

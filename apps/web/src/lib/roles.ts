@@ -12,8 +12,10 @@ export const ROUTES: RouteDef[] = [
   { path: '/driver', label: 'Driver', roles: ['driver'], description: 'Large-tile in-cab screen', icon: 'steering', group: 'Operations' },
   { path: '/owner', label: 'Cargo owner', roles: ['cargo_owner'], description: 'Shipment passport, alerts, backhaul offers', icon: 'box', group: 'Operations' },
   { path: '/warehouse', label: 'Warehouse', roles: ['warehouse_manager'], description: 'Incoming shipments and readiness', icon: 'warehouse', group: 'Operations' },
+  { path: '/port', label: 'Port operations', roles: ['port_controller', 'weighbridge_operator', 'transporter_admin', 'dispatcher', 'cargo_owner', 'auditor'], description: 'Eleven-stage truck and cargo workflow from pre-arrival to delivery, port KPIs and benchmarks', icon: 'anchor', group: 'Operations' },
   { path: '/registry', label: 'Clearance Registry', roles: ['port_controller', 'weighbridge_operator', 'auditor', 'regulator_readonly'], description: 'Load Compliance Tokens, release orders, permits, trust tiers and policy', icon: 'registry', group: 'Registry' },
   { path: '/model', label: 'RCS v2 Model', roles: ['port_controller', 'auditor', 'regulator_readonly'], description: 'Monte Carlo explorer for the port-anchored clearance chain (modelled)', icon: 'flask', group: 'Analysis' },
+  { path: '/data', label: 'Data register', roles: ['port_controller', 'weighbridge_operator', 'transporter_admin', 'dispatcher', 'driver', 'cargo_owner', 'warehouse_manager', 'auditor', 'regulator_readonly'], description: 'Every parameter with its provenance: actual, published, estimated or simulated', icon: 'database', group: 'Analysis' },
   { path: '/twin', label: 'Digital twin', roles: ['port_controller', 'weighbridge_operator', 'auditor', 'regulator_readonly', 'transporter_admin', 'dispatcher'], description: '3D port scene driven by live events', icon: 'cube', group: 'Analysis' },
   { path: '/admin', label: 'Admin', roles: [], description: 'Users, stations, integrations, ledger, agents', icon: 'settings', group: 'Admin' },
 ];

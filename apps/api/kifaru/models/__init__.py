@@ -3,6 +3,7 @@ from .backhaul import MATCH_STATUSES, OFFER_STATUSES, BackhaulMatch, BackhaulOff
 from .base import Base, utcnow
 from .fleet import Driver, DriverPII, Fleet, RfidTag, SpecialLoadPermit, Trailer, Vehicle
 from .misc import ApiIntegration, AuditEvent, Incident, LedgerEvent, Notification
+from .port import DATETIME_FIELDS, PORT_STAGE_META, PORT_STAGES, PORT_TO_SHIPMENT_STAGE, PortVisit
 from .queue import Appointment, QueueRecord
 from .shipments import (
     SHIPMENT_STAGES,
@@ -24,6 +25,10 @@ __all__ = [
     "STATION_KINDS",
     "OFFER_STATUSES",
     "ORG_TYPES",
+    "PORT_STAGES",
+    "PORT_STAGE_META",
+    "PORT_TO_SHIPMENT_STAGE",
+    "DATETIME_FIELDS",
     "ROLE_NAMES",
     "SENSOR_KINDS",
     "SHIPMENT_STAGES",
@@ -52,6 +57,7 @@ __all__ = [
     "LoadComplianceToken",
     "Notification",
     "Organization",
+    "PortVisit",
     "QueueRecord",
     "RefreshSession",
     "ReleaseOrder",

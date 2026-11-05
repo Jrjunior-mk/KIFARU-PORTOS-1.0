@@ -1622,4 +1622,94 @@ lanes, the chain and station simulations, and the web registry and model pages (
 access and data requests, the legal opinion, scale approval, the lane and port node hardware, the baseline study, and
 validation of the model against measured data. No regulator has reviewed or agreed the design.
 
+# 44. SmartPort port-process layer and data register (addendum)
+
+Added 2026-11-05 from the SmartPort document supplied by the project owner. Requirements and the per-stage data
+dictionary: `docs/01-requirements/smartport-workflow-and-data.md`; platform contract:
+`docs/02-architecture/smartport-port-process-contract.md`; figures and sources: `docs/06-operations/data-register.md`;
+traceability: RTM section M. Status tags as in section 7.3: [R] in code with simulated data, [D] designed, [P] planned.
+
+## 44.1 What the layer adds
+
+RCS v2 (section 43) concerns the weighing and the token. SmartPort places that weighing inside the whole truck and
+cargo workflow of the Port of Mombasa and makes every stage a recorded, measurable step. The platform now keeps one
+port-visit record per truck collection trip and advances it through eleven stages: pre-arrival registration and
+scheduling, customs clearance and document verification, truck arrival and identification, gate-in and security
+inspection, yard allocation and cargo location, cargo verification and loading, automated weighing and weight
+verification, final cargo and document verification, gate-out and port departure, inland transportation and cargo
+tracking, cargo delivery and trip closure. Each stage carries the data fields the SmartPort document specifies and
+cannot be passed without them. Stage 7 is the RCS v2 port gate-out weigh node: a pass on that lane attaches to the
+truck's active visit, fills the weighing fields (gross, tare, net, declared weight, discrepancy, calibration status)
+and records the Load Compliance Token that later weighbridges honour. [R]
+
+## 44.2 Data model and API
+
+`PortVisit` (schema `core`) holds identity, the per-stage columns listed in the contract, derived durations (queue
+wait, gate-in processing, yard wait, loading duration, weighing service, clearance duration, dwell time as gate-out
+minus gate-in, transit time as delivery minus gate-out) and a `source` tag (live / simulated / replay). Every stage
+change also writes a `CargoProcessingEvent` so the digital cargo passport shows the visit timeline, and the shipment
+stage is kept in step. Endpoints under `/api/v1/port`: stages and their required fields, create visit, list and get,
+advance with validation, cancel, KPIs with published benchmarks, a stage board, and a simulation call. The data register
+is served by `/api/v1/data/register`. [R]
+
+## 44.3 Agencies and data sharing
+
+Agency responsibilities are recorded per stage: KPA (entry and exit, handling, storage, terminals), KRA (declarations,
+duties, inspections, release), KenTrade (TradeNet single window: documents, permits, approvals), KeNHA (highways,
+axle-load compliance, weighbridges), NTSA (registration, roadworthiness, licensing), KEBS (standards of goods). Two
+adapters were added to the integration registry, `kentrade` and `kebs`, mock by default like the others; no agency
+endpoint is fabricated and no agency has agreed to share data. [R] for the registry, [P] for the agreements. The
+platform's shared view is the control centre plus the `/port` board: customs and agency clearance status, entry and
+exit authorisation, loading and weighing records, truck location and ETA, holds and delays, complementing the agency
+systems rather than replacing them.
+
+## 44.4 Data register with provenance
+
+Following the SmartPort classification (actual, published, estimated, simulated), every figure the platform, the
+simulations and the proposal rely on is listed with its unit, period, agency, source URL and the parameters that use
+it. Published figures recorded so far include: Mombasa throughput 41.1 million tonnes and 2,005,076 TEU in 2024 (KPA,
+press reports); truck turnaround 6.7 hours in 2023, down from 7.1 hours in 2022, and container dwell 3.6 days in 2023
+(KPA annual bulletin, Kenya News Agency); container ship turnaround 2.9 days and ship waiting 1.53 days in 2024 (KPA
+bulletin via The Star); national axle-load compliance 98.43 % over 10,776 km and 13 weighbridge stations in FY 2024/25
+(KeNHA Annual Report 2025); Mariakani at about 98.5 % compliance with more than 8,000 trucks a day (KeNHA statements,
+2026); Northern Corridor Observatory figures from 2016–2022 for Mariakani daily weighed traffic (2,162–5,312),
+compliance (96–99 %), the weighbridge share of stoppages (13.4 %), Mombasa–Malaba transit (53–77 hours against a 40-hour
+target) and Mombasa–Nairobi transit by RECTS (110–163 hours in early 2017); KenTrade single-window figures (22–30
+agencies, 30–50 % fewer documents, 2015–2017); SCEA figures (Nairobi ICD truck turnaround 3.7 hours in 2023; Mombasa
+dwell about 79 hours in late 2024). No entry is yet `actual`: no operational record has been obtained from an agency,
+and several published entries are press reports of agency statements. The newest primary figures are from the NCTTCA
+21st edition Observatory report (April 2026, data year 2025: throughput 45.45 million tonnes, 2.11 million TEU, import
+container dwell 106.7 hours against a 48-hour target, Mombasa–Nairobi transit 66 hours against 29) and the NCTTCA
+July–September 2026 quarterly report (Mariakani 7,954–9,184 trucks a day at 99.1–99.9 % compliance, import dwell 87
+hours, Mombasa–Malaba 94 hours); the KPA 2024/2025 bulletins remain to be obtained. Definitions differ (container dwell, truck
+turnaround, port dwell, transit) and the register says which is which. [R]
+
+## 44.5 Port-process simulation
+
+`kifaru_sim.port_process` is a SimPy model of stages 3 to 11: approach queue, gate-in (G gates), yard wait, loading
+(E equipment, duration by cargo type), weighing (W bridges), final clearance (C desks with a hold probability and hold
+duration), gate-out, then inland transit (distance, speed, random stops). Two policies are compared: `existing`
+(manual gate checks, static weighing, 15 % document holds, no appointment smoothing) and `smartport` (RFID/ANPR gate,
+port gate-out node with a token, pre-cleared documents, appointment smoothing driven by the queue forecast). KPIs are
+those of the SmartPort document: average waiting time, average queue length, truck processing time, weighbridge
+service time, throughput, port dwell time and transit time. The existing policy is calibrated so that its modelled
+dwell time reproduces the published 2023 truck turnaround of about 6.7 hours, and every output is labelled modelled.
+[R] for the model, [P] for validation against agency records.
+
+## 44.6 How this advances the SmartPort draft
+
+Verification is exception-based: a valid token and a clean record pass on identity and consistency, and only
+exceptions get a physical check. The port weighing feeds the road through the token, so the repeat stop is removed
+rather than merely recorded. Appointments are smoothed by the queue forecast instead of only being booked. Dwell and
+stage durations are KPIs with P90s shown beside published benchmarks. Every number is traceable to a register entry.
+
+## 44.7 Status and what remains
+
+Implemented in software with simulated data: the port-visit record and stage validation, automatic stage 7 from the
+port gate-out node, KPIs and board, the data register and its page, the KEBS and KenTrade adapters, and the
+port-process simulation. Not done: agency data-sharing agreements and real adapter credentials, live GPS feeds,
+obtaining `actual` operational records (KPA gate and yard logs, KRA release timestamps, KeNHA weighbridge logs),
+refreshing the register from the latest Observatory and KPA bulletins, and validating the port-process model against
+measured dwell and queue data.
+
 *End of report.*

@@ -243,6 +243,7 @@ def seed(verbose: bool = True) -> None:
                 if stage == "at_port":
                     db.add(CargoProcessingEvent(shipment_id=s.id, stage="at_port", occurred_at=utcnow() - timedelta(hours=18), source="manual"))
 
+        _seed_port_visits(db, vehicles, orgs)
         ensure_registry(db)
         db.commit()
     if verbose:
@@ -251,6 +252,61 @@ def seed(verbose: bool = True) -> None:
         print(f"  password for all demo accounts: {DEMO_PASSWORD}" + ("   (generated; re-run the seed to reset it, or set KIFARU_SEED_PASSWORD)" if _PASSWORD_GENERATED else ""))
         for email, _, roles_, _ in DEMO_USERS:
             print(f"  {email:40s} {', '.join(roles_)}")
+
+
+
+def _seed_port_visits(db, vehicles, orgs) -> None:
+    """Three demo port visits (SIMULATED) at different stages: pre-registered, loaded (a port gate-out pass advances it to
+    weighed) and delivered with full timestamps. Idempotent by stable id."""
+    from .models.port import PortVisit
+    from .services import port_visits as pv
+
+    now = utcnow()
+    specs = [
+        ("pv-pre", "KDE 230G", "pwani", "pre_registered", "Nakuru"),
+        ("pv-loaded", "KDA 412B", "simba", "loaded", "Nairobi ICD"),
+        ("pv-done", "KDB 118C", "simba", "delivered", "Nakuru"),
+    ]
+    flow = {
+        "customs_cleared": {"customs_declaration_ref": "KRA-ICMS-2026-118822", "trade_direction": "import", "duty_status": "paid", "customs_status": "cleared",
+                            "inspection_status": "not_required", "permit_status": "approved", "bill_of_lading": "MSCUMBA123456"},
+        "arrived": {"appointment_valid": True, "queue_length": 14, "queue_wait_s": 1500, "anpr_plate": None},
+        "gate_in": {"gate_in_id": "GATE-18", "access_authorised": True, "vehicle_inspection": "passed", "driver_verified": True, "gate_in_processing_s": 230},
+        "yard_allocated": {"terminal_id": "CT2", "yard_block": "B14", "container_position": "B14-07-03", "loading_instruction": "LI-2026-55310", "yard_wait_s": 18900},
+        "loaded": {"equipment_id": "RS-21", "seal_number": "SEAL-7731", "cargo_verification": "matched", "cargo_condition": "good"},
+        "weighed": {"gross_kg": 38200, "tare_kg": 14500, "calibration_valid": True},
+        "final_cleared": {"cargo_release_status": "approved", "delivery_order_ref": "DO-55310", "gate_pass_no": "GP-2026-99812", "payment_status": "paid"},
+        "gate_out": {"gate_out_id": "GATE-18", "exit_cargo_verified": True, "exit_authorised": True},
+        "in_transit": {"route": "A109 Mombasa - Nairobi - Nakuru", "distance_km": 640},
+        "delivered": {"pod_ref": "POD-2026-0412"},
+    }
+    order = [s for s in pv.PORT_STAGES]
+    for sid, plate, org_key, target, dest in specs:
+        if db.get(PortVisit, stable_id("portvisit", sid)) is not None or plate not in vehicles:
+            continue
+        veh = vehicles[plate]
+        t = now - timedelta(hours=30 if target == "delivered" else 4)
+        v = pv.create(db, shipment=None, vehicle_id=veh.id, driver_id=None, transporter_org_id=orgs[org_key].id, owner_org_id=orgs[org_key].id, appointment_id=None,
+                      data={"truck_type": veh.body_type, "cargo_type": "container", "declared_mass_kg": 24000, "destination": dest,
+                            "appointment_at": (t + timedelta(hours=2)).isoformat(), "container_number": "MSCU1234565"},
+                      source="simulated", at=t)
+        v.id = stable_id("portvisit", sid)
+        db.flush()
+        for st in order[1:order.index(target) + 1]:
+            t = t + timedelta(minutes={"arrived": 90, "gate_in": 25, "yard_allocated": 10, "loaded": 330, "weighed": 15, "final_cleared": 20, "gate_out": 10,
+                                       "in_transit": 5, "delivered": 900}.get(st, 30))
+            data = dict(flow.get(st, {}))
+            if st == "arrived":
+                data["anpr_plate"] = plate
+            if st == "loaded":
+                data.update({"loading_start_at": (t - timedelta(minutes=22)).isoformat(), "loading_end_at": t.isoformat()})
+            if st == "weighed":
+                data.update({"weighing_start_at": (t - timedelta(minutes=2)).isoformat(), "weighing_end_at": t.isoformat()})
+            if st == "in_transit":
+                data["eta_at"] = (t + timedelta(hours=15)).isoformat()
+            if st == "delivered":
+                data["arrived_destination_at"] = t.isoformat()
+            pv.advance(db, v, st, data, at=t, source="simulated")
 
 
 if __name__ == "__main__":

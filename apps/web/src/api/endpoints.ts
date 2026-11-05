@@ -142,5 +142,24 @@ export const rcs = {
   sweep: (body: T.RcsSweepIn) => http.post<T.RcsSweepOut>('/rcs/model/sweep', body),
 };
 
-export const api = { auth, fleet, stations, weighing, tickets, shipments, queue, backhaul, notifications, environment, integrations, admin, rcs };
+/** SmartPort port process — visits, stage board, KPIs and the existing-vs-SmartPort simulation (docs/02-architecture/smartport-port-process-contract.md). */
+export const port = {
+  stages: () => http.get<T.PortStageDef[]>('/port/stages'),
+  visits: (p: { stage?: string; vehicle_id?: string; shipment_id?: string; status?: string; limit?: number } = {}) => http.get<T.PortVisitOut[]>(`/port/visits${qs(p)}`),
+  visit: (id: string) => http.get<T.PortVisitOut>(`/port/visits/${id}`),
+  createVisit: (body: T.PortVisitIn) => http.post<T.PortVisitOut>('/port/visits', body),
+  advance: (id: string, body: T.StageAdvanceIn) => http.post<T.PortVisitOut>(`/port/visits/${id}/advance`, body),
+  cancel: (id: string, reason: string) => http.post<T.PortVisitOut>(`/port/visits/${id}/cancel`, { reason }),
+  kpis: (hours = 24) => http.get<T.PortKpisOut>(`/port/kpis${qs({ hours })}`),
+  board: () => http.get<T.PortBoardOut>('/port/board'),
+  simulate: (body: Partial<T.PortSimIn>) => http.post<T.PortSimOut>('/port/simulate', body),
+};
+
+/** Data register — every parameter the platform and its simulations use, with provenance (actual / published / estimated / simulated). */
+export const data = {
+  register: (p: { classification?: string; agency?: string } = {}) => http.get<T.DataParameterOut[]>(`/data/register${qs(p)}`),
+  entry: (key: string) => http.get<T.DataParameterOut>(`/data/register/${encodeURIComponent(key)}`),
+};
+
+export const api = { auth, fleet, stations, weighing, tickets, shipments, queue, backhaul, notifications, environment, integrations, admin, rcs, port, data };
 export default api;

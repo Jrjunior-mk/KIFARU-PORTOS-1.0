@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Area, Bar, BarChart, CartesianGrid, Cell, ComposedChart, Legend, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { admin as adminApi, environment as envApi, fleet as fleetApi, queue as queueApi, rcs as rcsApi, stations as stationsApi, weighing as weighingApi } from '../api/endpoints';
+import { admin as adminApi, environment as envApi, fleet as fleetApi, port as portApi, queue as queueApi, rcs as rcsApi, stations as stationsApi, weighing as weighingApi } from '../api/endpoints';
 import type { IncidentCategory, IncidentIn, LiveEvent, QueueOut, RcsStatsOut, StationOut } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { LaneTypeBadge, ROUTE_COLORS, RouteBadge, ShareBar, StationKindBadge, STREAM_COLORS } from '../components/rcs';
@@ -10,6 +10,7 @@ import { useMutation, useQuery } from '../hooks/useQuery';
 import { chartTheme, DECISION_COLOR, SERIES, useDarkMode } from '../lib/chart';
 import { fmtAgo, fmtDateTime, fmtDuration, fmtKg, fmtNum, fmtPct, fmtTime, titleCase } from '../lib/format';
 import { laneTypeLabel, ROUTE_LABEL, ROUTES_ALL, streamLabel } from '../lib/rcs';
+import { fmtSeconds, stageShort } from '../lib/port';
 
 const StationMap = lazy(() => import('../components/StationMap'));
 const LIVE_TYPES = ['clearance.decided', 'queue.updated', 'station.failure', 'incident.opened', 'sensor.health', 'truck.diverted', 'truck.released'];
@@ -23,6 +24,8 @@ export default function Control() {
   const incidentsQ = useQuery(() => adminApi.incidents('open'), [], { pollMs: 60_000 });
   const envQ = useQuery(() => envApi.report({ hours: 24 }), [], { pollMs: 120_000 });
   const rcsQ = useQuery(() => rcsApi.stats(), [], { pollMs: 30_000 });
+  const portKpisQ = useQuery(() => portApi.kpis(24), [], { pollMs: 60_000 });
+  const portBoardQ = useQuery(() => portApi.board(), [], { pollMs: 60_000 });
   const [selected, setSelected] = useState<string | null>(null);
 
   const live = useLiveEvents(LIVE_TYPES, null, 200, (ev: LiveEvent) => {
@@ -47,10 +50,26 @@ export default function Control() {
         {stations.map((s) => <StationCard key={s.id} s={s} selected={selected === s.id} onSelect={() => setSelected(s.id)} canAct={canAct} onChanged={() => void stationsQ.refetch()} />)}
       </section>
 
-      <Card title="RCS v2 network" subtitle="GET /rcs/stats · truck streams, routes and token coverage across all nodes" actions={<a className="btn-secondary px-2 py-1 text-xs" href="/registry">Open registry</a>}>
-        <ErrorBanner error={rcsQ.error} />
-        {rcsQ.data ? <RcsNetwork s={rcsQ.data} /> : !rcsQ.error && <Skeleton lines={3} />}
-      </Card>
+      <div className="grid gap-4 lg:grid-cols-3">
+        <Card title="RCS v2 network" subtitle="GET /rcs/stats · truck streams, routes and token coverage across all nodes" className="lg:col-span-2" actions={<a className="btn-secondary px-2 py-1 text-xs" href="/registry">Open registry</a>}>
+          <ErrorBanner error={rcsQ.error} />
+          {rcsQ.data ? <RcsNetwork s={rcsQ.data} /> : !rcsQ.error && <Skeleton lines={3} />}
+        </Card>
+        <Card title="Port operations" subtitle="GET /port/kpis · last 24 h" actions={<a className="btn-secondary px-2 py-1 text-xs" href="/port">Open board</a>}>
+          <ErrorBanner error={portKpisQ.error} />
+          {portKpisQ.data ? (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-2">
+                <Stat label="Port dwell time" value={fmtSeconds(portKpisQ.data.avg_dwell_time_s)} tone="teal" hint={<span className="text-[11px] text-ink-500">{(() => { const b = portKpisQ.data!.benchmarks.find((x) => x.key.includes('truck_turnaround')); return b ? `${b.label}: ${b.value} ${b.unit}` : 'no benchmark'; })()}</span>} />
+                <Stat label="Throughput" value={portKpisQ.data.throughput_per_hour === null ? '—' : `${fmtNum(portKpisQ.data.throughput_per_hour, 1)} / h`} hint={<span className="text-[11px] text-ink-500">{portKpisQ.data.gate_outs_total} gate-outs</span>} />
+              </div>
+              <div className="flex flex-wrap gap-1 text-[11px]">
+                {(portBoardQ.data?.stages ?? []).map((c) => <span key={c.stage} className="chip">{stageShort(c.stage)} <b>{c.count}</b></span>)}
+              </div>
+            </div>
+          ) : !portKpisQ.error && <Skeleton lines={3} />}
+        </Card>
+      </div>
 
       <div className="grid gap-4 lg:grid-cols-3">
         <Card title="Live clearance feed" subtitle="clearance.decided events over WebSocket" className="lg:col-span-1">

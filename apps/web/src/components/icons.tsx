@@ -3,7 +3,7 @@ import type { SVGProps } from 'react';
 
 export type IconName =
   | 'dashboard' | 'scale' | 'truck' | 'steering' | 'box' | 'warehouse' | 'cube' | 'shield' | 'registry' | 'flask' | 'settings'
-  | 'bell' | 'menu' | 'close' | 'chevron' | 'logout' | 'search' | 'check' | 'alert' | 'info' | 'token' | 'ruler' | 'port' | 'quarry' | 'road' | 'lane' | 'static';
+  | 'bell' | 'menu' | 'close' | 'chevron' | 'logout' | 'search' | 'check' | 'alert' | 'info' | 'token' | 'ruler' | 'port' | 'quarry' | 'road' | 'lane' | 'static' | 'anchor' | 'database' | 'link';
 
 const PATHS: Record<IconName, string> = {
   dashboard: 'M3 13h8V3H3zM13 21h8V11h-8zM13 3v5h8V3zM3 21h8v-5H3z',
@@ -33,6 +33,9 @@ const PATHS: Record<IconName, string> = {
   road: 'M9 3L6 21M15 3l3 18M12 6v2M12 11v2M12 16v2',
   lane: 'M3 12h18M3 7h4M3 17h4M17 7h4M17 17h4M12 4v16',
   static: 'M4 20h16M6 20V9h12v11M9 9V4h6v5M9 14h6',
+  anchor: 'M12 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM12 8v13M5 12H2a10 10 0 0 0 20 0h-3M8 12H5M19 12h-3',
+  database: 'M12 8c5 0 9-1.3 9-3s-4-3-9-3-9 1.3-9 3 4 3 9 3zM3 5v14c0 1.7 4 3 9 3s9-1.3 9-3V5M3 12c0 1.7 4 3 9 3s9-1.3 9-3',
+  link: 'M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1.5 1.5M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1.5-1.5',
 };
 
 export function Icon({ name, size = 18, className = '', ...rest }: { name: IconName; size?: number } & SVGProps<SVGSVGElement>) {

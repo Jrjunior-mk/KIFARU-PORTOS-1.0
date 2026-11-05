@@ -359,6 +359,9 @@ export interface LiveEvent {
   event_id: string; type: LiveEventType | string; occurred_at: string; station_id: string | null; org_id: string | null;
   payload: Record<string, unknown>; producer?: string; schema_version?: number;
 }
+// SmartPort port-process types live in port_types.ts (same contract); re-exported here so pages import from one place.
+export * from './port_types';
+
 export interface ClearancePayload {
   weighing_event_id: string; decision_id: string; decision: Decision; plate: string | null; gvm_kg: number; u_kg: number; axle_config: string | null;
   lane_id: string; latency_ms: number; source: Source; rules_fired: string[];

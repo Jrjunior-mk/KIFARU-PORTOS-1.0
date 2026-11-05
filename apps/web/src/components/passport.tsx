@@ -1,4 +1,8 @@
 import { useState } from 'react';
+import { port as portApi } from '../api/endpoints';
+import { useQuery } from '../hooks/useQuery';
+import { fmtSeconds, stageShort } from '../lib/port';
+import { PORT_STAGES } from '../api/types';
 import { type PassportOut, SHIPMENT_STAGES } from '../api/types';
 import { fmtDateTime, fmtKg, titleCase } from '../lib/format';
 import { TicketCard } from './weighing';
@@ -29,6 +33,7 @@ export function PassportView({ s, stations }: { s: PassportOut; stations?: { id:
         <div className="text-right"><Badge tone="teal">{titleCase(s.stage)}</Badge><div className="text-xs text-slate-500">{s.status}</div></div>
       </div>
       <StageTimeline s={s} />
+      <PortVisitStrip shipmentId={s.id} />
 
       {s.outstanding.length > 0 && (
         <Notice tone="warn"><span className="font-medium">Outstanding:</span> {s.outstanding.map((o) => titleCase(o)).join(' · ')}</Notice>
@@ -97,6 +102,24 @@ export function PassportView({ s, stations }: { s: PassportOut; stations?: { id:
         )}
         {ticketId && <div className="mt-3"><TicketCard ticketId={ticketId} /></div>}
       </div>
+    </div>
+  );
+}
+
+
+/** Compact port-visit timeline (SmartPort stages) for a shipment, when one exists. GET /port/visits?shipment_id= */
+export function PortVisitStrip({ shipmentId }: { shipmentId: string }) {
+  const q = useQuery(() => portApi.visits({ shipment_id: shipmentId, limit: 1 }), [shipmentId]);
+  const v = q.data?.[0];
+  if (!v) return null;
+  const done = new Set(v.timeline.map((t) => t.stage));
+  return (
+    <div className="rounded-lg border border-ink-100 p-2 text-xs dark:border-ink-800">
+      <div className="flex flex-wrap items-center justify-between gap-1"><span className="font-medium">Port visit {v.reference}</span><a className="text-brand-700 underline dark:text-brand-300" href="/port">open board</a></div>
+      <ol className="mt-1 flex flex-wrap gap-1" aria-label="Port visit stages">
+        {PORT_STAGES.map((st, i) => <li key={st} className={`rounded px-1.5 py-0.5 ${done.has(st) ? 'bg-brand-600 text-white' : st === v.stage ? 'bg-amber-200 text-amber-900 dark:bg-amber-900/50 dark:text-amber-100' : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400'}`}>{i + 1}. {stageShort(st)}</li>)}
+      </ol>
+      <div className="mt-1 text-ink-500">dwell {fmtSeconds(v.kpis.dwell_time_s)} · transit {fmtSeconds(v.kpis.transit_time_s)} · queue wait {fmtSeconds(v.kpis.queue_wait_s)}</div>
     </div>
   );
 }

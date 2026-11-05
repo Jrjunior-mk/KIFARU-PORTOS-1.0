@@ -10,6 +10,14 @@ captured without a stop; red cases still go to the static scale and an authorise
 holds tokens, certificates, permits, release orders and demerit data for every station. Design, legal basis and
 modelled effect: `docs/01-requirements/rcs-v2-port-anchored-clearance.md`.
 
+**SmartPort port-process layer.** Around the weighing sits the full port workflow: one port-visit record per truck
+collection trip, advanced through eleven stages (pre-arrival registration, customs clearance, arrival, gate-in, yard
+allocation, loading, weighing at the port gate-out node, final clearance and gate pass, gate-out with dwell time,
+inland transit, delivery) with the data each stage requires, agency roles (KPA, KRA, KenTrade, KeNHA, NTSA, KEBS),
+KPIs shown beside published benchmarks, a data register that classifies every figure as actual, published,
+estimated or simulated with its source, and an "existing port versus SmartPort" simulation. See
+`docs/01-requirements/smartport-workflow-and-data.md` and `docs/06-operations/data-register.md`.
+
 | | |
 |---|---|
 | Live site | **https://kifaru-portos-1-0.vercel.app** — Vercel project `kifaru-portos-1-0`, deployed automatically from `main` of this repository, backed by the Supabase PostgreSQL project KIFARU-PORTOS (durable, shared data; polling instead of WebSockets on serverless). See `docs/06-operations/vercel-demo-hosting.md` and `docs/06-operations/supabase-postgres.md`. |
@@ -44,16 +52,19 @@ kifaru-portos/
 ├── .github/workflows/  CI (lint, tests, web build, terraform validate, security scans) and OIDC deploy pipeline
 └── docs/
     ├── 01-requirements/  RCS v2 plan (rcs-v2-port-anchored-clearance.md), legal hooks (legal-hooks-eac-vlc-2018.md),
-    │                     source review (original v1 document missing — see 00-source-review.md), RTM (section L = RCS v2)
+    │                     SmartPort workflow and per-stage data (smartport-workflow-and-data.md), source review
+    │                     (original v1 document missing — see 00-source-review.md), RTM (L = RCS v2, M = SmartPort)
     ├── 02-architecture/  system, cloud, database ERD, hardware, tech stack, roadmap (incl. RCS v2 phases),
-    │                     RCS v2 API contract (rcs-v2-api-contract.md)
+    │                     RCS v2 API contract (rcs-v2-api-contract.md), SmartPort port-process contract
+    │                     (smartport-port-process-contract.md)
     ├── 03-hardware/      sensor architecture, analog front-end calculations, power/protection, enclosure,
     │                     communications, calibration, lab rig build guide, BOM, rolling verification lane,
     │                     port gate-out weigh node
     ├── 04-security/      threat model, controls catalogue, DPIA (Kenya DPA 2019), incident response plan
-    ├── 05-report/        engineering report (42 sections + RCS v2 addendum, section 43)
+    ├── 05-report/        engineering report (42 sections + addenda 43 RCS v2, 44 SmartPort)
     └── 06-operations/    deployment guide, DR runbook, backups, local development, API documentation
-                          (+ openapi.json), simulation guide, RCS v2 simulation plan, emissions model, maintenance,
+                          (+ openapi.json), simulation guide, RCS v2 simulation plan, data register with sources
+                          (data-register.md), emissions model, maintenance,
                           user manuals, USSD/SMS spec, pilot shadow-mode plan (incl. v2 additions), verified test results
 ```
 
@@ -110,9 +121,10 @@ kifaru-sim v2-sweep --factor avg_loading_pct --values 75,80,85,90      # port-tr
 kifaru-sim v2-sweep --factor token_coverage --values 0.3,0.5,0.7,0.9   # mixed-traffic table (plan §9)
 kifaru-sim v2-gate                                                      # go/no-go gate evaluation
 kifaru-sim run --scenarios rcs_v2_tokens_90,rcs_v2_lane_closure        # SimPy station model with tokens and a verification lane
+kifaru-sim port --reps 3 --hours 24                                     # SmartPort port process: existing vs SmartPort (gate-in, yard, loading, weighing, clearance, gate-out, transit)
 ```
 
-The same model backs `POST /api/v1/rcs/model` and the web page `/model`. Plan and assumptions:
+The same models back `POST /api/v1/rcs/model`, `POST /api/v1/port/simulate` and the web pages `/model`, `/port` (visit board and KPIs) and `/data` (data register). Plan and assumptions:
 `docs/06-operations/rcs-v2-simulation-plan.md`. Every figure is an estimate under stated assumptions until the Phase 2
 baseline study replaces them with measured data.
 

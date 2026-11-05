@@ -36,6 +36,8 @@ ADAPTERS: dict[str, dict[str, Any]] = {
     "email": {"display": "Email (SES/SMTP)", "contract": "SendEmail {to, subject, body}"},
     "maps": {"display": "Mapping and routing (OSRM / Google Routes)", "contract": "GET /route/v1/driving/{coords} -> {distance_m, duration_s}"},
     "telematics": {"display": "GPS / telematics providers", "contract": "GET /units, GET /positions?since=; webhook positions"},
+    "kebs": {"display": "KEBS standards and PVoC / import standardisation mark", "contract": "GET /v1/consignments/{ref}/standards-status -> {status, certificate_no, inspected_at}"},
+    "kentrade": {"display": "KenTrade TradeNet single window", "contract": "GET /v1/declarations/{ucr}/permits -> [{agency, permit, status, issued_at}]; webhook permit updates"},
 }
 
 
