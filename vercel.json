@@ -4,6 +4,9 @@
   "buildCommand": "cd apps/web && npm run build",
   "outputDirectory": "apps/web/dist",
   "framework": null,
+  "regions": [
+    "dub1"
+  ],
   "build": {
     "env": {
       "VITE_WS_DISABLED": "1"
@@ -16,16 +19,53 @@
     }
   },
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api/index" },
-    { "source": "/health", "destination": "/api/index" },
-    { "source": "/ready", "destination": "/api/index" },
-    { "source": "/docs", "destination": "/api/index" },
-    { "source": "/redoc", "destination": "/api/index" },
-    { "source": "/openapi.json", "destination": "/api/index" },
-    { "source": "/((?!assets/|icons/|sw\\.js|workbox-|manifest\\.webmanifest|favicon\\.svg|robots\\.txt).*)", "destination": "/index.html" }
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/index"
+    },
+    {
+      "source": "/health",
+      "destination": "/api/index"
+    },
+    {
+      "source": "/ready",
+      "destination": "/api/index"
+    },
+    {
+      "source": "/docs",
+      "destination": "/api/index"
+    },
+    {
+      "source": "/redoc",
+      "destination": "/api/index"
+    },
+    {
+      "source": "/openapi.json",
+      "destination": "/api/index"
+    },
+    {
+      "source": "/((?!assets/|icons/|sw\\.js|workbox-|manifest\\.webmanifest|favicon\\.svg|robots\\.txt).*)",
+      "destination": "/index.html"
+    }
   ],
   "headers": [
-    { "source": "/api/(.*)", "headers": [{ "key": "Cache-Control", "value": "no-store" }] },
-    { "source": "/sw.js", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] }
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store"
+        }
+      ]
+    },
+    {
+      "source": "/sw.js",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-cache"
+        }
+      ]
+    }
   ]
 }

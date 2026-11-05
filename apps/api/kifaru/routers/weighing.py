@@ -92,14 +92,29 @@ class WeighingOut(BaseModel):
     token_ref: str | None = None
 
 
-def _token_ref(db, token_id: str | None) -> str | None:
+def _token_ref(db, token_id: str | None, refs: dict[str, str] | None = None) -> str | None:
     if not token_id:
         return None
+    if refs is not None:
+        return refs.get(token_id)
     t = db.get(LoadComplianceToken, token_id)
     return t.token_ref if t else None
 
 
-def _out(db, ev: WeighingEvent, plates: dict[str, str] | None = None) -> WeighingOut:
+def _token_refs_for(db, events: list[WeighingEvent]) -> dict[str, str]:
+    """One query for every token referenced by a page of events (honoured, checked or issued)."""
+    ids: set[str] = set()
+    for e in events:
+        if e.token_id:
+            ids.add(e.token_id)
+        if e.decision:
+            ids.update(x for x in (e.decision.token_checked_id, e.decision.token_issued_id) if x)
+    if not ids:
+        return {}
+    return {t.id: t.token_ref for t in db.execute(select(LoadComplianceToken.id, LoadComplianceToken.token_ref).where(LoadComplianceToken.id.in_(ids))).all()}
+
+
+def _out(db, ev: WeighingEvent, plates: dict[str, str] | None = None, refs: dict[str, str] | None = None) -> WeighingOut:
     plate = None
     if ev.vehicle_id:
         if plates is not None:
@@ -117,7 +132,7 @@ def _out(db, ev: WeighingEvent, plates: dict[str, str] | None = None) -> Weighin
         axle_count=ev.axle_count, detected_axle_config=ev.detected_axle_config, class_code=ev.class_code, quality_flags=ev.quality_flags,
         sensor_health=ev.sensor_health, pavement_temp_c=ev.pavement_temp_c, source=ev.source, kind=ev.kind,
         node_kind=ev.node_kind or "road_mainline", stream=ev.stream or "untokened", length_m=ev.length_m, width_m=ev.width_m, height_m=ev.height_m,
-        lifted_axle=bool(ev.lifted_axle), token_id=ev.token_id, token_ref=_token_ref(db, ev.token_id),
+        lifted_axle=bool(ev.lifted_axle), token_id=ev.token_id, token_ref=_token_ref(db, ev.token_id, refs),
         axles=[AxleOut(axle_index=a.axle_index, load_kg=a.load_kg, uncertainty_kg=a.uncertainty_kg, spacing_to_next_m=a.spacing_to_next_m, group_no=a.group_no) for a in ev.axles],
         identity=IdentityOut(anpr_plate=ident.anpr_plate, anpr_confidence=ident.anpr_confidence, rfid_epc=ident.rfid_epc, rfid_confidence=ident.rfid_confidence,
                              confidence=ident.confidence, method=ident.method, explanation=ident.explanation) if ident else None,
@@ -126,7 +141,7 @@ def _out(db, ev: WeighingEvent, plates: dict[str, str] | None = None) -> Weighin
                              latency_ms=d.latency_ms, explanation=d.explanation, static_verified_gvm_kg=d.static_verified_gvm_kg,
                              override_reason=d.override_reason, ticket_id=d.ticket.id if d.ticket else None, ticket_type=d.ticket.type if d.ticket else None,
                              qr_token=d.ticket.qr_token if d.ticket else None, route=d.route or "continue",
-                             token_checked_ref=_token_ref(db, d.token_checked_id), token_issued_ref=_token_ref(db, d.token_issued_id),
+                             token_checked_ref=_token_ref(db, d.token_checked_id, refs), token_issued_ref=_token_ref(db, d.token_issued_id, refs),
                              fee_preview_usd=d.fee_preview_usd) if d else None,
     )
 
@@ -146,8 +161,9 @@ def list_events(p: CurrentUser, db: DbDep, station_id: str | None = None, vehicl
         q = q.join(Vehicle, Vehicle.id == WeighingEvent.vehicle_id).where(Vehicle.org_id == scope)
     rows = db.execute(q).scalars().all()
     ids = {e.vehicle_id for e in rows if e.vehicle_id}
-    plates = {v.id: v.plate for v in db.execute(select(Vehicle).where(Vehicle.id.in_(ids))).scalars()} if ids else {}
-    return [_out(db, e, plates) for e in rows]
+    plates = {v.id: v.plate for v in db.execute(select(Vehicle.id, Vehicle.plate).where(Vehicle.id.in_(ids))).all()} if ids else {}
+    refs = _token_refs_for(db, rows)
+    return [_out(db, e, plates, refs) for e in rows]
 
 
 @router.get("/events/{event_id}", response_model=WeighingOut)

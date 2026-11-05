@@ -65,7 +65,8 @@ def test_two_source_identity_rule():
 def test_deployed_config_rejects_dev_defaults():
     from kifaru.config import Settings
 
-    s = Settings(env="prod", database_url="postgresql+psycopg://x:y@h/db", jwt_secret="CHANGE-ME-dev-only-secret-not-for-production")
+    # _env_file=None: the check must not depend on secrets a developer keeps in a local .env
+    s = Settings(_env_file=None, env="prod", database_url="postgresql+psycopg://x:y@h/db", jwt_secret="CHANGE-ME-dev-only-secret-not-for-production", signing_seed_b64=None, pii_key_b64=None)
     try:
         s.validate_for_deployment()
         raise AssertionError("expected RuntimeError")

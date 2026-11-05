@@ -25,7 +25,8 @@ export interface LiveEventsState {
 }
 
 const WS_DISABLED = (import.meta.env.VITE_WS_DISABLED as string | undefined) === '1';
-const POLL_MS = 5000;
+const POLL_MS = 8000; // polling fallback cadence; paused while the tab is hidden
+const POLL_HIDDEN_MS = 30000;
 const WS_FAILURES_BEFORE_POLLING = 2;
 
 export function eventSource(ev: LiveEvent): string | null {
@@ -76,6 +77,11 @@ export function useLiveEvents(types?: string[], station?: string | null, max = 3
 
     const poll = async () => {
       if (closed) return;
+      if (document.visibilityState === 'hidden') {
+        // do not hammer the API from background tabs; check again later
+        pollTimer = window.setTimeout(() => void poll(), POLL_HIDDEN_MS);
+        return;
+      }
       const token = await ensureFreshAccessToken();
       if (token) {
         const params = new URLSearchParams({ minutes: '30', limit: '100' });
