@@ -12,6 +12,16 @@ const BASE = (process.argv[2] ?? process.env.API_BASE ?? 'http://localhost:8000'
 const API = `${BASE}/api/v1`;
 const PASSWORD = process.env.KIFARU_SEED_PASSWORD; // the password printed by `python -m kifaru.seed`
 if (!PASSWORD) { console.error('Set KIFARU_SEED_PASSWORD to the demo password printed by the seed command'); process.exit(2); }
+// Demo accounts come from the same file the seed uses (private apps/api/seed_accounts.json, else the committed example),
+// so the script works whatever e-mail domain the developer chose. Override with KIFARU_SEED_ACCOUNTS.
+import { readFileSync, existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
+const here = dirname(fileURLToPath(import.meta.url));
+const accountsFile = [process.env.KIFARU_SEED_ACCOUNTS, resolve(here, '../../api/seed_accounts.json'), resolve(here, '../../api/seed_accounts.example.json')].find((f) => f && existsSync(f));
+const ACCOUNTS = JSON.parse(readFileSync(accountsFile, 'utf8')).users;
+const byRole = (role, org) => (ACCOUNTS.find((u) => u.roles.includes(role) && (!org || u.org === org)) ?? ACCOUNTS.find((u) => u.roles.includes(role))).email;
+const EMAIL = { operator: byRole('weighbridge_operator'), owner: byRole('cargo_owner', 'mamambo'), transporter: byRole('transporter_admin', 'simba'), admin: byRole('platform_admin') };
 let failures = 0;
 
 function ok(cond, msg) { console.log(`${cond ? 'PASS' : 'FAIL'}  ${msg}`); if (!cond) failures++; }
@@ -32,7 +42,7 @@ const health = await fetch(`${BASE}/health`).then((r) => r.json()).catch(() => n
 ok(health?.status === 'ok', `API health at ${BASE}`);
 
 // 1. auth
-const op = await login('operator@demo.invalid');
+const op = await login(EMAIL.operator);
 const me = await call('GET', '/auth/me', undefined, op.access_token);
 ok(me.status === 200 && me.json.roles.includes('weighbridge_operator'), `/auth/me -> ${me.json.full_name}`);
 const rf = await call('POST', '/auth/refresh', { refresh_token: op.refresh_token });
@@ -40,7 +50,7 @@ ok(rf.status === 200 && rf.json.refresh_token !== op.refresh_token, 'refresh rot
 const reuse = await call('POST', '/auth/refresh', { refresh_token: op.refresh_token });
 ok(reuse.status === 401, 'reusing a rotated refresh token is rejected (401)');
 const opTok = rf.json.access_token;
-const bad = await call('POST', '/auth/login', { email: 'operator@demo.invalid', password: 'wrong' });
+const bad = await call('POST', '/auth/login', { email: EMAIL.operator, password: 'wrong' });
 ok(bad.status === 401, 'wrong password -> 401');
 
 // 2. operator simulate flow
@@ -80,7 +90,7 @@ const fc = await call('GET', `/queue/${st.id}/forecast`, undefined, opTok);
 ok(fc.status === 200 && fc.json.length === 4 && fc.json[0].source === 'forecast', `forecast horizons ${fc.json.map((f) => f.kind).join(',')} model ${fc.json[0].model_version}`);
 
 // 3. cargo owner shipment creation
-const owner = await login('owner@cargo-a.invalid');
+const owner = await login(EMAIL.owner);
 const badShip = await call('POST', '/shipments', { description: 'Smoke test invalid container', cargo_type: 'container', origin: 'Port of Mombasa', destination: 'Nairobi ICD', declared_mass_kg: 20000, containers: [{ number: 'MSKU1234560', size_ft: 40, type: 'GP' }] }, owner.access_token);
 const vErr = badShip.json?.detail;
 ok(badShip.status === 422 && Array.isArray(vErr) && vErr[0].loc.join('.').includes('containers.0.number'), `invalid ISO 6346 check digit -> 422 at ${Array.isArray(vErr) ? `${vErr[0].loc.join('.')}: ${vErr[0].msg}` : 'n/a'}`);
@@ -96,7 +106,7 @@ const matched = await call('POST', `/backhaul/offers/${offer.json.id}/match`, un
 ok(matched.status === 200, `matching ran: ${matched.json.matches?.length} proposals, status ${matched.json.status}`);
 
 // 4. transporter slot booking + 409
-const tr = await login('dispatch@transporter-a.invalid');
+const tr = await login(EMAIL.transporter);
 const veh = await call('GET', '/fleet/vehicles', undefined, tr.access_token);
 ok(veh.status === 200 && veh.json.length > 0 && veh.json.every((v) => v.org_id === tr.org_id), `transporter sees ${veh.json.length} own vehicles only`);
 const slots = await call('GET', `/queue/${st.id}/slots?hours=2`, undefined, tr.access_token);
@@ -114,7 +124,7 @@ const wi = await call('POST', '/environment/what-if', { stops_avoided: 10, stops
 ok(wi.status === 200 && wi.json.savings && /modelled/.test(wi.json.label), `what-if label: "${wi.json.label}"`);
 
 // admin
-const adm = await login('admin@demo.invalid');
+const adm = await login(EMAIL.admin);
 const lv = await call('GET', '/admin/ledger/verify', undefined, adm.access_token);
 ok(lv.status === 200 && lv.json.ok === true, `ledger chain ok (${lv.json.checked}/${lv.json.total})`);
 const agents = await call('GET', '/admin/agents', undefined, adm.access_token);
