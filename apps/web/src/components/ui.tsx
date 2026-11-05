@@ -20,16 +20,71 @@ export function Card({ title, subtitle, actions, children, className = '', id }:
   );
 }
 
-export function Stat({ label, value, hint, tone = 'default' }: { label: string; value: ReactNode; hint?: ReactNode; tone?: 'default' | 'green' | 'amber' | 'red' | 'teal' }) {
+export function Stat({ label, value, hint, tone = 'default', delta, deltaTone }: { label: string; value: ReactNode; hint?: ReactNode; tone?: 'default' | 'green' | 'amber' | 'red' | 'teal'; delta?: ReactNode; deltaTone?: 'up' | 'down' | 'flat' }) {
   const tones: Record<string, string> = {
-    default: 'text-slate-900 dark:text-slate-50',
+    default: 'text-ink-900 dark:text-slate-50',
     green: 'text-decision-green', amber: 'text-decision-amber', red: 'text-decision-red', teal: 'text-brand-700 dark:text-brand-300',
   };
+  const dt = deltaTone === 'up' ? 'text-green-700 dark:text-green-300' : deltaTone === 'down' ? 'text-rose-700 dark:text-rose-300' : 'text-ink-500';
   return (
-    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-950">
-      <div className="text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">{label}</div>
-      <div className={`text-xl font-semibold tabular-nums ${tones[tone]}`}>{value}</div>
-      {hint && <div className="text-xs text-slate-500 dark:text-slate-400">{hint}</div>}
+    <div className="card-muted px-3 py-2.5">
+      <div className="text-[11px] font-semibold uppercase tracking-wider text-ink-500 dark:text-ink-300">{label}</div>
+      <div className={`stat-value mt-0.5 text-xl font-semibold leading-tight tabular-nums ${tones[tone]}`}>{value}</div>
+      {(hint || delta) && (
+        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-ink-500 dark:text-ink-300">
+          {delta && <span className={`font-medium ${dt}`}>{delta}</span>}
+          {hint && <span>{hint}</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Page title block used at the top of every authenticated page. */
+export function PageHeader({ title, subtitle, actions, eyebrow }: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode; eyebrow?: ReactNode }) {
+  return (
+    <div className="flex flex-wrap items-end justify-between gap-3">
+      <div className="min-w-0">
+        {eyebrow && <div className="section-title mb-1">{eyebrow}</div>}
+        <h1 className="text-xl font-semibold leading-tight text-ink-900 sm:text-2xl dark:text-slate-50">{title}</h1>
+        {subtitle && <p className="mt-1 text-sm text-ink-500 dark:text-ink-300">{subtitle}</p>}
+      </div>
+      {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+    </div>
+  );
+}
+
+export function SectionTitle({ children, hint }: { children: ReactNode; hint?: ReactNode }) {
+  return <div className="mb-2 flex items-baseline justify-between gap-2"><h3 className="section-title">{children}</h3>{hint && <span className="text-xs text-ink-400">{hint}</span>}</div>;
+}
+
+/** Loading placeholder blocks. */
+export function Skeleton({ lines = 3, className = '' }: { lines?: number; className?: string }) {
+  return (
+    <div className={`space-y-2 ${className}`} aria-hidden="true">
+      {Array.from({ length: lines }).map((_, i) => <div key={i} className="skeleton h-3.5" style={{ width: `${90 - (i % 3) * 18}%` }} />)}
+    </div>
+  );
+}
+
+/** Right-hand detail drawer; closes on Escape or backdrop click. */
+export function Drawer({ open, title, onClose, children, width = 'max-w-xl' }: { open: boolean; title: ReactNode; onClose: () => void; children: ReactNode; width?: string }) {
+  useEffect(() => {
+    if (!open) return;
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, [open, onClose]);
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end bg-ink-950/50 backdrop-blur-[2px]" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <aside role="dialog" aria-modal="true" className={`flex h-full w-full ${width} flex-col border-l border-ink-200 bg-white shadow-pop dark:border-ink-800 dark:bg-ink-900`}>
+        <header className="flex items-center justify-between gap-2 border-b border-ink-100 px-4 py-3 dark:border-ink-800">
+          <h2 className="text-base font-semibold">{title}</h2>
+          <button className="btn-ghost p-1.5" aria-label="Close" onClick={onClose}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg></button>
+        </header>
+        <div className="flex-1 overflow-y-auto p-4">{children}</div>
+      </aside>
     </div>
   );
 }

@@ -116,3 +116,34 @@ def test_scenario_registry():
         scn.build("does_not_exist")
     cfg = scn.build("station_lane_failure", hours=10)
     assert cfg.lane_failures and cfg.lane_failures[0][1] == 7200.0
+
+
+# ----------------------------------------------------------------------------------------- RCS v2 policy
+def test_rcs_v2_lane_absorbs_amber_and_tokens_cut_stops():
+    v1 = _run("rolling_clearance", seed=11).metrics()
+    none = _run("rcs_v2_untokened", seed=11).metrics()
+    full = _run("rcs_v2_tokens_90", seed=11).metrics()
+    assert v1["pct_lane"] == 0.0 and none["pct_lane"] > 5.0 and full["pct_tokened"] > 70.0
+    # the lane is not a stop: static-scale stops fall even with no tokens, and further with tokens
+    assert none["pct_stopped"] < v1["pct_stopped"]
+    assert full["pct_stopped"] < v1["pct_stopped"] and full["static_utilisation"] < v1["static_utilisation"]
+    assert 0.0 < full["lane_utilisation"] < 1.0 and full["max_queue_lane"] >= 0
+
+
+def test_rcs_v2_lane_closure_sends_amber_back_to_static():
+    open_ = _run("rcs_v2_tokens_90", seed=5).metrics()
+    closed = _run("rcs_v2_lane_closure", seed=5).metrics()
+    assert closed["pct_stopped"] > open_["pct_stopped"]
+    assert closed["pct_lane"] < open_["pct_lane"]
+
+
+def test_rcs_v2_records_streams_routes_and_lane_passes():
+    r = _run("rcs_v2_tokens_50", seed=2)
+    streams = {t.stream for t in r.trucks}
+    assert streams >= {"port", "origin", "untokened"}
+    assert all(t.route in ("continue", "verification_lane", "static_scale", "hold", "port_reweigh") for t in r.trucks)
+    for t in r.trucks:
+        if t.lane_pass:
+            assert "verification_lane" in (t.route, "verification_lane") and t.wait_lane_s >= 0
+        if not t.stopped and not t.lane_pass:
+            assert t.decision == "GREEN"

@@ -12,3 +12,32 @@
 
 Critical path: 1 → 2 → 3 → 4 → 5 → 7, with 6 in parallel from Phase 2 onward.
 Blocking external dependencies: AWS account (Phase 2 deploy), SMS account (3), weighbridge site access and regulator engagement (6–7).
+
+## RCS v2 roadmap (port-anchored clearance)
+
+Source: `docs/01-requirements/rcs-v2-port-anchored-clearance.md` §8. Months are counted from approval of the v2
+redesign. The software items of Phases 2 and 3 (token service, registry APIs, mock agency APIs, chain and station
+simulation, web registry and model pages) are implemented in this repository with simulated data; every other item is
+open.
+
+| Phase | When | What happens | Exit gate |
+|---|---|---|---|
+| **v2-0/1 Access and legal** | Months 0–3 | Meet KPA, KRA, KeNHA, NTSA, KenTrade, the weights-and-measures body, the Kenya Transporters Association and two or three candidate loaders (a quarry, a mine or factory). Request data (simulation plan §6). Legal opinion on Reg 10(2), Reg 5, Reg 3(4) and digital certificates | MoUs or written interest, data access agreed, legal route clear |
+| **v2-2 Baseline and design** | Months 3–7 | Time-and-motion study at the port exit and Mariakani. Classification count for the real share of port and non-port trucks. Study of dimension and lifted-axle violations. Run the four-level simulation (16 weeks). Specify token, APIs and security | Validated model meets the go/no-go gate (simulation plan §9) |
+| **v2-3 Bench prototype** | Months 6–11 | Scale-model rig, token service, OCR on recorded video, LiDAR dimension portal test, per-wheel scale test, mock agency APIs, replay of recorded signals | Latency and repeatability targets met on the rig |
+| **v2-4 Shadow pilot** | Months 10–16 | One port exit lane, one origin site and a verification lane at Mariakani. Tokens issued and compared, nobody acts on them (`docs/06-operations/pilot-shadow-mode.md` §7) | Accuracy and false-clear targets met over a sustained period |
+| **v2-5 Live pilot** | Months 16–24 | Volunteer fleets and loaders use the green lane. Approved signs (Reg 9). Static scale audits continue. Seek approval of lane scales as legal-grade (Reg 5) | Agency approval to operate live, then scale to other stations |
+
+Critical path: v2-0/1 → v2-2 → v2-4 → v2-5, with v2-3 in parallel from month 6. No hardware spend before the v2-2 gate.
+
+### Integration map
+
+| System | Data exchanged | Dependency risk | Platform adapter |
+|---|---|---|---|
+| KPA gate systems (i-Gate, KWATOS) | Gate events, release status, exit slip | KPA must allow a weigh node in the exit lane | `kpa` (mock) |
+| KRA (iCMS, ACD, tracking seals) | Release status, declared weight, seal ID, overload alerts | Data-sharing agreement | `kra` (mock) |
+| KeNHA control centre and WIM feed | Road weights, static results, certificates, release orders, officer e-signature | Access to the feed or permission to add readers and a lane | `kenha` (mock) |
+| Loading-site scales (private) | Signed tickets, calibration certificates | Approval and audit of each scale | `origin_scale` lanes, `Lane.legal_grade` |
+| NTSA vehicle and permit records | Registration, tare, axle configuration, special-load permits | Data quality | `ntsa` (mock), `SpecialLoadPermit` |
+| KenTrade and clearing agents | Document status | Optional first, deeper later | `customs` (mock) |
+| Insurers (later) | Insurance validity | Optional | not registered |

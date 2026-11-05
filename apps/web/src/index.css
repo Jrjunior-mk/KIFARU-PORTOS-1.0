@@ -4,35 +4,45 @@
 
 @layer base {
   :root { color-scheme: light dark; }
-  html { -webkit-text-size-adjust: 100%; }
-  body { @apply min-h-screen antialiased; }
+  html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+  body { @apply min-h-screen antialiased font-sans text-[15px] leading-relaxed; font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11'; }
+  h1, h2, h3, h4 { @apply tracking-tight; }
+  .tabular-nums, table, .stat-value { font-variant-numeric: tabular-nums; }
   /* Visible focus for keyboard users everywhere */
-  :focus-visible { @apply outline-none ring-2 ring-brand-500 ring-offset-2 ring-offset-white dark:ring-offset-slate-950; }
+  :focus-visible { @apply outline-none ring-2 ring-brand-500 ring-offset-2 ring-offset-white dark:ring-offset-ink-950; }
+  ::selection { @apply bg-brand-200 text-ink-900; }
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
   }
 }
 
 @layer components {
-  .card { @apply rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900; }
+  .card { @apply rounded-2xl border border-ink-100 bg-white shadow-card dark:border-ink-800 dark:bg-ink-900; }
+  .card-muted { @apply rounded-xl border border-ink-100 bg-surface-50 dark:border-ink-800 dark:bg-ink-950/60; }
   .input {
-    @apply block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder-slate-400 shadow-sm
+    @apply block w-full rounded-lg border border-ink-200 bg-white px-3 py-2 text-sm text-ink-900 placeholder-ink-400 shadow-sm transition
       focus:border-brand-500 focus:ring-brand-500 disabled:cursor-not-allowed disabled:opacity-60
-      dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder-slate-500;
+      dark:border-ink-700 dark:bg-ink-950 dark:text-slate-100 dark:placeholder-ink-500;
   }
   .btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium transition
+      focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2
       disabled:cursor-not-allowed disabled:opacity-50;
   }
-  .btn-primary { @apply btn bg-brand-600 text-white hover:bg-brand-700 active:bg-brand-800; }
-  .btn-secondary { @apply btn border border-slate-300 bg-white text-slate-800 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800; }
-  .btn-ghost { @apply btn text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800; }
-  .btn-danger { @apply btn bg-rose-700 text-white hover:bg-rose-800; }
-  .label { @apply mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400; }
-  .th { @apply px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400; }
+  .btn-primary { @apply btn bg-brand-600 text-white shadow-sm hover:bg-brand-700 active:bg-brand-800; }
+  .btn-secondary { @apply btn border border-ink-200 bg-white text-ink-800 shadow-sm hover:border-ink-300 hover:bg-surface-50 dark:border-ink-700 dark:bg-ink-900 dark:text-slate-100 dark:hover:bg-ink-800; }
+  .btn-ghost { @apply btn text-ink-700 hover:bg-ink-100 dark:text-slate-200 dark:hover:bg-ink-800; }
+  .btn-danger { @apply btn bg-rose-700 text-white shadow-sm hover:bg-rose-800; }
+  .label { @apply mb-1 block text-[11px] font-semibold uppercase tracking-wider text-ink-500 dark:text-ink-300; }
+  .th { @apply sticky top-0 z-[1] bg-surface-100 px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wider text-ink-500 dark:bg-ink-950 dark:text-ink-300; }
   .td { @apply px-3 py-2 align-top text-sm; }
-  .tr { @apply border-t border-slate-100 dark:border-slate-800; }
+  .tr { @apply border-t border-ink-100 transition-colors hover:bg-surface-50 dark:border-ink-800 dark:hover:bg-ink-800/50; }
   .mono { @apply font-mono text-xs; }
+  .section-title { @apply text-[11px] font-semibold uppercase tracking-wider text-ink-500 dark:text-ink-300; }
+  .skeleton { @apply rounded-md bg-ink-100 dark:bg-ink-800; background-image: linear-gradient(90deg, transparent 0, rgba(255,255,255,0.35) 40px, transparent 80px); background-size: 800px 100%; @apply animate-shimmer; }
+  .nav-item { @apply flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium text-ink-300 transition hover:bg-white/5 hover:text-white; }
+  .nav-item-active { @apply bg-white/10 text-white shadow-inner; }
+  .chip { @apply inline-flex items-center gap-1 rounded-full border border-ink-200 bg-white px-2 py-0.5 text-[11px] font-medium text-ink-700 dark:border-ink-700 dark:bg-ink-900 dark:text-slate-200; }
 }
 
 /* MapLibre popups in dark mode */

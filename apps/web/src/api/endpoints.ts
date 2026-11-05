@@ -121,5 +121,26 @@ export const admin = {
   agents: () => http.get<T.AgentCatalogue>('/admin/agents'),
 };
 
-export const api = { auth, fleet, stations, weighing, tickets, shipments, queue, backhaul, notifications, environment, integrations, admin };
+/** RCS v2 — clearance registry, release orders, permits, statistics and the Monte Carlo model (docs/02-architecture/rcs-v2-api-contract.md). */
+export const rcs = {
+  policy: () => http.get<T.RcsPolicyOut>('/rcs/policy'),
+  trustTiers: () => http.get<T.TrustTierOut[]>('/rcs/trust-tiers'),
+  tokens: (p: { status?: string; source?: string; vehicle_id?: string; station_id?: string; limit?: number } = {}) => http.get<T.TokenOut[]>(`/rcs/tokens${qs(p)}`),
+  tokenLookup: (plate: string) => http.get<T.TokenOut>(`/rcs/tokens/lookup${qs({ plate })}`),
+  token: (id: string) => http.get<T.TokenOut>(`/rcs/tokens/${id}`),
+  tokenVerify: (ref: string) => http.get<T.TokenVerifyOut>(`/rcs/tokens/verify/${encodeURIComponent(ref)}`, { auth: false }),
+  suspendToken: (id: string, reason: string) => http.post<T.TokenOut>(`/rcs/tokens/${id}/suspend`, { reason }),
+  revokeToken: (id: string, reason: string) => http.post<T.TokenOut>(`/rcs/tokens/${id}/revoke`, { reason }),
+  releaseOrders: (p: { status?: string; vehicle_id?: string } = {}) => http.get<T.ReleaseOrderOut[]>(`/rcs/release-orders${qs(p)}`),
+  releaseOrder: (id: string) => http.get<T.ReleaseOrderOut>(`/rcs/release-orders/${id}`),
+  issueReleaseOrder: (body: T.ReleaseOrderIn) => http.post<T.ReleaseOrderOut>('/rcs/release-orders', body),
+  releaseOrderStatus: (id: string, status: 'paid' | 'closed') => http.post<T.ReleaseOrderOut>(`/rcs/release-orders/${id}/status`, { status }),
+  permits: (vehicle_id?: string) => http.get<T.PermitOut[]>(`/rcs/permits${qs({ vehicle_id })}`),
+  createPermit: (body: T.PermitIn) => http.post<T.PermitOut>('/rcs/permits', body),
+  stats: (station_id?: string) => http.get<T.RcsStatsOut>(`/rcs/stats${qs({ station_id })}`),
+  model: (body: Partial<T.RcsModelIn>) => http.post<T.RcsModelOut>('/rcs/model', body),
+  sweep: (body: T.RcsSweepIn) => http.post<T.RcsSweepOut>('/rcs/model/sweep', body),
+};
+
+export const api = { auth, fleet, stations, weighing, tickets, shipments, queue, backhaul, notifications, environment, integrations, admin, rcs };
 export default api;

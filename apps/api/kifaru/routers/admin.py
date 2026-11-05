@@ -10,7 +10,7 @@ from sqlalchemy import func, select, text
 from kifaru_ai_agents.orchestrator import Orchestrator
 
 from ..config import get_settings
-from ..deps import CurrentUser, DbDep, Principal, audit, require_roles
+from ..deps import CurrentUser, DbDep, Principal, audit, invalidate_user_cache, require_roles
 from ..events import bus
 from ..models import (
     ROLE_NAMES,
@@ -100,6 +100,7 @@ def patch_user(user_id: str, body: UserPatch, db: DbDep, p: Principal = Depends(
         u.roles = list(db.execute(select(Role).where(Role.name.in_(body.roles))).scalars())
     if body.is_active is not None:
         u.is_active = body.is_active
+    invalidate_user_cache(u.id)
     if body.org_id is not None:
         u.org_id = body.org_id
     audit(db, p, "update", "user", u.id, before=before, after=body.model_dump(exclude_none=True))

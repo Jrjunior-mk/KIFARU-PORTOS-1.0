@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     # Database — PostgreSQL in all deployed environments; SQLite permitted for `test` and quick local runs.
     database_url: str = "sqlite:///./kifaru_dev.db"
     db_echo: bool = False
+    # Hosted PostgreSQL (e.g. Supabase): force TLS and/or transaction-pooler-safe settings even if the host name does not reveal it
+    db_require_ssl: bool = False
+    db_pooler_transaction_mode: bool = False
 
     # Redis (optional locally; required in staging/prod for multi-instance WebSocket fan-out)
     redis_url: str | None = None
@@ -53,7 +56,7 @@ class Settings(BaseSettings):
     local_object_dir: str = "./objects"
 
     # Clearance engine configuration
-    limits_version: str = "KE-EAC-VLC-2016-schedule-v1"
+    limits_version: str = "KE-EAC-VLC-REG-2018-schedule-v2"
     audit_sample_rate: float = 0.02  # 2 % of GREEN-eligible passes diverted for random audit
     identity_min_confidence: float = 0.90
     coverage_factor_k: float = 2.0
@@ -64,6 +67,22 @@ class Settings(BaseSettings):
     mfa_enforce_enrolment: bool | None = None
     # Pilot recommendation: require two independent identity sources (RFID and ANPR) for GREEN
     identity_require_two_sources: bool = False
+    # RCS v2: Load Compliance Token policy (validity windows in hours by token source; consistency tolerance by source)
+    token_validity_hours_port: int = 36
+    token_validity_hours_origin: int = 36
+    token_validity_hours_lane: int = 24
+    token_validity_hours_road: int = 24
+    token_tolerance_port: float = 0.08
+    token_tolerance_origin: float = 0.08
+    token_tolerance_lane: float = 0.08
+    token_tolerance_road: float = 0.11
+    # Audit rates by trust tier (1 port, 2 approved origin scale, 3 road node/lane, 4 on-board record only)
+    audit_rate_tier1: float = 0.02
+    audit_rate_tier2: float = 0.04
+    audit_rate_tier3: float = 0.03
+    audit_rate_tier4: float = 1.0
+    # Reg 14: a second overload in the same journey triples the fee; journey window used to detect it (hours)
+    release_order_journey_hours: int = 72
     # Which ingest transport the `kifaru.ingest` entrypoint runs: iot_core (SQS from IoT rule) | emqx (MQTT) | none
     iot_mode: str = "emqx"
     events_queue_url: str | None = None
@@ -73,6 +92,10 @@ class Settings(BaseSettings):
 
     # Rate limiting
     rate_limit_per_minute: int = 300
+    # Authenticated-user cache (seconds). Every request otherwise costs three database round trips (user, roles, PII)
+    # before its own work; against a remote database (Supabase) that is over a second. Entries are invalidated on
+    # role / activation / MFA changes; 0 disables the cache.
+    auth_cache_seconds: int = 60
 
     # CORS
     cors_origins: list[str] = ["http://localhost:5173", "http://localhost:3000"]

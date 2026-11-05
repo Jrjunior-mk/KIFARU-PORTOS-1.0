@@ -1,7 +1,9 @@
 import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import { admin as adminApi, fleet as fleetApi, integrations as integrationsApi, stations as stationsApi } from '../api/endpoints';
-import { ALL_ROLES, type IncidentIn, type LaneIn, type Role, type StationIn, type StationOut, type UserIn, type UserOut } from '../api/types';
-import { Badge, Card, Confirm, Empty, ErrorBanner, Field, KV, Notice, Spinner, Stat, StatusDot, Table, Tabs, Toggle } from '../components/ui';
+import { ALL_ROLES, LANE_TYPES, STATION_KINDS, type IncidentIn, type LaneIn, type Role, type StationIn, type StationKind, type StationOut, type UserIn, type UserOut } from '../api/types';
+import { LaneTypeBadge, StationKindBadge } from '../components/rcs';
+import { Badge, Card, Confirm, Empty, ErrorBanner, Field, KV, Notice, PageHeader, Spinner, Stat, StatusDot, Table, Tabs, Toggle } from '../components/ui';
+import { laneTypeLabel, stationKindLabel } from '../lib/rcs';
 import { useLiveEvents } from '../hooks/useLiveEvents';
 import { useMutation, useQuery } from '../hooks/useQuery';
 import { fmtAgo, fmtDateTime, short, titleCase } from '../lib/format';
@@ -12,7 +14,7 @@ export default function Admin() {
   const [tab, setTab] = useState<Tab>('users');
   return (
     <div className="space-y-4">
-      <h1 className="text-xl font-semibold">Platform administration</h1>
+      <PageHeader eyebrow="Admin" title="Platform administration" subtitle="Users, stations and lanes (including port gate-out, origin and rolling verification lanes), calibration, integrations, audit, ledger, health and agents." />
       <Tabs value={tab} onChange={setTab} tabs={[{ id: 'users', label: 'Users' }, { id: 'stations', label: 'Stations & lanes' }, { id: 'calibration', label: 'Calibration' }, { id: 'integrations', label: 'Integrations' }, { id: 'incidents', label: 'Incidents' }, { id: 'audit', label: 'Audit log' }, { id: 'ledger', label: 'Ledger' }, { id: 'health', label: 'System health' }, { id: 'agents', label: 'AI agents' }]} />
       {tab === 'users' && <Users />}
       {tab === 'stations' && <Stations />}
@@ -87,10 +89,10 @@ function Users() {
 
 function Stations() {
   const q = useQuery(() => stationsApi.list(), []);
-  const [form, setForm] = useState<StationIn>({ code: '', name: '', lat: -3.86, lon: 39.47, capacity_per_hour: 120, static_capacity_per_hour: 40, alt_allowed: false });
+  const [form, setForm] = useState<StationIn>({ code: '', name: '', lat: -3.86, lon: 39.47, capacity_per_hour: 120, static_capacity_per_hour: 40, alt_allowed: false, kind: 'road_station' });
   const create = useMutation((b: StationIn) => stationsApi.create(b));
   const [laneFor, setLaneFor] = useState<string>('');
-  const [lane, setLane] = useState<LaneIn>({ lane_no: 3, type: 'wim_highspeed', direction: 'inbound', device_id: '' });
+  const [lane, setLane] = useState<LaneIn>({ lane_no: 3, type: 'wim_highspeed', direction: 'inbound', device_id: '', legal_grade: false });
   const createLane = useMutation((a: { st: string; body: LaneIn }) => stationsApi.createLane(a.st, a.body));
   const fe = create.error?.fieldErrors ?? {};
   const fl = createLane.error?.fieldErrors ?? {};
@@ -101,9 +103,9 @@ function Stations() {
         <ErrorBanner error={q.error} />
         {q.loading ? <Spinner /> : (q.data ?? []).map((s: StationOut) => (
           <details key={s.id} className="mb-2 rounded border border-slate-200 p-2 dark:border-slate-800">
-            <summary className="flex cursor-pointer flex-wrap items-center gap-2 text-sm"><StatusDot status={s.status} /><span className="font-semibold">{s.code}</span> {s.name} <span className="text-xs text-slate-500">{s.lat}, {s.lon} · {s.capacity_per_hour}/h WIM · {s.static_capacity_per_hour}/h static · {s.alt_allowed ? 'alt route allowed' : 'no alt route'} · {s.lanes.length} lanes</span></summary>
+            <summary className="flex cursor-pointer flex-wrap items-center gap-2 text-sm"><StatusDot status={s.status} /><span className="font-semibold">{s.code}</span> {s.name} <StationKindBadge kind={s.kind} /> <span className="text-xs text-ink-500">{s.lat}, {s.lon} · {s.capacity_per_hour}/h WIM · {s.static_capacity_per_hour}/h static · {s.alt_allowed ? 'alt route allowed' : 'no alt route'} · {s.lanes.length} lanes</span></summary>
             <Table head={['Lane', 'Type', 'Direction', 'Status', 'Device', 'Calibration valid to', 'Sensors']} dense>
-              {s.lanes.map((l) => <tr key={l.id} className="tr"><td className="td">{l.lane_no}</td><td className="td">{titleCase(l.type)}</td><td className="td">{l.direction}</td><td className="td"><StatusDot status={l.status} /> {l.status}</td><td className="td mono">{l.device_id ?? '—'}</td><td className="td">{l.calibration_valid_to ? fmtDateTime(l.calibration_valid_to) : <span className="text-rose-600">none</span>}</td><td className="td text-xs">{l.sensors.length} ({l.sensors.filter((x) => x.status !== 'ok').length} not ok)</td></tr>)}
+              {s.lanes.map((l) => <tr key={l.id} className="tr"><td className="td">{l.lane_no}</td><td className="td"><LaneTypeBadge type={l.type} legalGrade={l.legal_grade} /></td><td className="td">{l.direction}</td><td className="td"><StatusDot status={l.status} /> {l.status}</td><td className="td mono">{l.device_id ?? '—'}</td><td className="td">{l.calibration_valid_to ? fmtDateTime(l.calibration_valid_to) : <span className="text-rose-600">none</span>}</td><td className="td text-xs">{l.sensors.length} ({l.sensors.filter((x) => x.status !== 'ok').length} not ok)</td></tr>)}
             </Table>
           </details>
         ))}
@@ -117,17 +119,19 @@ function Stations() {
             <Field label="Lon" error={fe.lon}>{(id) => <input id={id} type="number" step="any" className="input" value={form.lon} onChange={(e) => setForm({ ...form, lon: Number(e.target.value) })} />}</Field>
             <Field label="WIM cap/h" error={fe.capacity_per_hour}>{(id) => <input id={id} type="number" className="input" value={form.capacity_per_hour} onChange={(e) => setForm({ ...form, capacity_per_hour: Number(e.target.value) })} />}</Field>
             <Field label="Static cap/h" error={fe.static_capacity_per_hour}>{(id) => <input id={id} type="number" className="input" value={form.static_capacity_per_hour} onChange={(e) => setForm({ ...form, static_capacity_per_hour: Number(e.target.value) })} />}</Field>
+            <div className="col-span-2"><Field label="Station kind" error={fe.kind}>{(id) => <select id={id} className="input" value={form.kind ?? 'road_station'} onChange={(e) => setForm({ ...form, kind: e.target.value as StationKind })}>{STATION_KINDS.map((k) => <option key={k} value={k}>{stationKindLabel(k)}</option>)}</select>}</Field></div>
             <div className="col-span-2"><Toggle label="Alternate route allowed" checked={form.alt_allowed} onChange={(v) => setForm({ ...form, alt_allowed: v })} /></div>
             <div className="col-span-2"><button className="btn-primary w-full" type="submit" disabled={create.busy}>Create station</button><ErrorBanner error={create.error} className="mt-2" />{create.result && <Notice tone="ok" className="mt-2">Created {create.result.code}</Notice>}</div>
           </form>
         </Card>
-        <Card title="Create lane" subtitle="POST /stations/{id}/lanes · WIM lanes get the default 13-sensor set">
+        <Card title="Create lane" subtitle="POST /stations/{id}/lanes · WIM lanes get the default 13-sensor set; verification and port lanes get per-wheel scales and the LiDAR portal">
           <form className="grid grid-cols-2 gap-2" onSubmit={async (e) => { e.preventDefault(); if (await createLane.run({ st: laneFor, body: { ...lane, device_id: lane.device_id || null } })) void q.refetch(); }}>
             <div className="col-span-2"><Field label="Station">{(id) => <select id={id} className="input" value={laneFor} onChange={(e) => setLaneFor(e.target.value)}>{(q.data ?? []).map((s) => <option key={s.id} value={s.id}>{s.code}</option>)}</select>}</Field></div>
             <Field label="Lane no" error={fl.lane_no}>{(id) => <input id={id} type="number" min={1} max={20} className="input" value={lane.lane_no} onChange={(e) => setLane({ ...lane, lane_no: Number(e.target.value) })} />}</Field>
-            <Field label="Type" error={fl.type}>{(id) => <select id={id} className="input" value={lane.type} onChange={(e) => setLane({ ...lane, type: e.target.value as LaneIn['type'] })}><option value="wim_highspeed">WIM high-speed</option><option value="wim_lowspeed">WIM low-speed</option><option value="static">Static</option></select>}</Field>
+            <Field label="Type" error={fl.type}>{(id) => <select id={id} className="input" value={lane.type} onChange={(e) => setLane({ ...lane, type: e.target.value as LaneIn['type'] })}>{LANE_TYPES.map((t) => <option key={t} value={t}>{laneTypeLabel(t)}</option>)}</select>}</Field>
             <Field label="Direction" error={fl.direction}>{(id) => <select id={id} className="input" value={lane.direction} onChange={(e) => setLane({ ...lane, direction: e.target.value })}><option>inbound</option><option>outbound</option></select>}</Field>
             <Field label="Device ID" error={fl.device_id}>{(id) => <input id={id} className="input" value={lane.device_id ?? ''} onChange={(e) => setLane({ ...lane, device_id: e.target.value })} placeholder="gw-xxx-l3" />}</Field>
+            <div className="col-span-2"><Toggle label="Legal grade (weights-and-measures approved, Reg 5)" checked={!!lane.legal_grade} onChange={(v) => setLane({ ...lane, legal_grade: v })} /></div>
             <div className="col-span-2"><button className="btn-primary w-full" type="submit" disabled={createLane.busy || !laneFor}>Create lane</button><ErrorBanner error={createLane.error} className="mt-2" />{createLane.result && <Notice tone="ok" className="mt-2">Lane {createLane.result.lane_no} created with {createLane.result.sensors.length} sensors</Notice>}</div>
           </form>
         </Card>

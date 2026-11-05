@@ -133,3 +133,152 @@ Covers: conservation (every truck exits), baseline stops 100 % vs rolling < 50 %
 saturated configuration, lane failure raises the static queue, capacity −1 raises utilisation, hold/priority scenarios
 run, determinism with a fixed seed, time-of-day and slot-cap behaviour, report rendering (Markdown + JSON), CLI, and the
 SUMO adapter's export/replay/graceful degradation.
+
+## 7. RCS v2 chain model (`kifaru_sim.rcs_v2`, `kifaru_sim.experiments`)
+
+**Status: modelled results only.** The chain model is the Monte Carlo behind Section 9 of the RCS v2 plan
+(`docs/01-requirements/rcs-v2-port-anchored-clearance.md`). It is independent of the SimPy station model: it has no
+queues or service times, only loads, scale errors and decision rules, which is why it can run 600 000 trucks in well
+under a second and answer "what share of trucks stops where" for each policy. Queue behaviour stays with the SimPy
+model and SUMO (levels L2 and L3 of the simulation plan).
+
+### 7.1 What is modelled
+
+```
+true load (fraction of limit) --> port gate-out / origin scale --token--> first road station --> later stations
+                                   (1 % error)                            | mainline WIM 2.5 %      (token honoured)
+                                                                          |--> rolling verification lane 1 %
+                                                                          +--> static scale (legal proof)
+```
+
+| Element | Model | Default (`ChainParams`) |
+|---|---|---|
+| Loads | Normal(`avg_loading_pct`, `load_spread_pct`) as a fraction of the legal limit, capped just below the limit (heavily loaded fleets bunch at the limit); `overload_prob` of trucks placed 0–15 % over | 85 %, 12 %, 1.5 % |
+| Scale readings | true × (1 + Normal(0, error)) per node | port 1 %, origin 1 %, road 2.5 %, lane 1 % |
+| Screening rule | reading × (1 + 2 × error) > limit sends the truck for a closer look (k = 2 expanded uncertainty, as in the clearance engine). This is the choice that reproduces the plan's 23 % road-only share at 85 % loading | — |
+| Token consistency | a tokened truck on the road continues when abs(road − token) ≤ 3 combined standard deviations (8.1 % for port/origin tokens, 10.6 % for road tokens); the absolute near-limit test is not applied to tokened trucks | — |
+| Streams | port / origin / untokened; derived from `token_coverage` (60 / 40 split of the tokened share) unless `stream_mix` is given | coverage 0.9 |
+| Lane | untokened trucks inside the margin band or audited go to the lane; the lane sends to the static scale those with lane reading × (1 + `lane_margin_pct`) over the limit; a legal-grade lane has margin 0 | margin 2 % |
+| Port node | green when port reading × (1 + 2 × port error) is within the limit (margin 0 if `port_legal_grade`); otherwise port re-weigh | not legal grade |
+| Allowance | `allowance_pct` raises the limit everywhere it is applied; the "road-only with allowance" column always shows the 5 % policy bound when no allowance is configured | 0 % |
+| Audits | `audit_rate` of mainline greens go to the lane (or to the static scale in the port-truck table, which has no lane) | 3 % |
+| Later station | every truck carries a token (port, origin, road or lane); only audits, mismatches and certain overloads stop | — |
+| Truck-hours | `trucks_per_day` × share × minutes / 60; one percentage point = 8 truck-hours at 8 000 trucks/day and 6 min per stop; a lane pass costs `lane_minutes` | 8 000, 6 min, 1.5 min |
+| Lane capacity | 3600 / (27 m ÷ 2.78 m/s) ≈ 370 trucks/h; peak demand = `peak_per_hour` × untokened lane share (a peak hour of untokened trucks, the conservative case) | 500/h |
+
+Common random numbers: all policies inside one run share the same loads, errors and audit draws, so the difference
+between two columns is a paired comparison, not seed noise. Replications (`replicate`) change the seed.
+
+### 7.2 Running it
+
+```bash
+kifaru-sim v2                                            # both Section 9 tables at the defaults (200 000 trucks per row)
+kifaru-sim v2 --n 600000 --out packages/simulation/reports --stem rcs-v2-example
+kifaru-sim v2 --set allowance_pct=5 --set port_legal_grade=true
+kifaru-sim v2-sweep --factor token_coverage --values 0.3,0.5,0.7,0.9,1.0
+kifaru-sim v2-sweep --factor port_error_pct --values 0.5,1,2 --json
+kifaru-sim v2-gate --reps 30 --tornado                   # Section 10.9 gate, 95 % CIs, tornado sensitivity
+kifaru-sim v2-gate --baseline 21.0                       # use a measured road-only stop share as the baseline
+```
+
+```python
+from kifaru_sim import ChainParams, run_chain, sweep, replicate, tornado, evaluate_gate
+r = run_chain(ChainParams(avg_loading_pct=85, token_coverage=0.9))
+r.to_dict()                       # the RcsModelOut shape of docs/02-architecture/rcs-v2-api-contract.md
+sweep("token_coverage", [0.3, 0.5, 0.7, 0.9], ChainParams())
+replicate(ChainParams(), reps=30)["outputs"]["v2_road_static"]   # {"mean", "ci_low", "ci_high", "n"}
+evaluate_gate(r)                  # {"proceed": bool, "checks": [...]}
+```
+
+`POST /api/v1/rcs/model` and `/rcs/model/sweep` call the same functions, so the web explorer and the CLI can never disagree.
+
+### 7.3 Reading the two tables
+
+Example output: `packages/simulation/reports/rcs-v2-example.md`.
+
+*Port trucks by average loading.* Each row is one population of port trucks measured under four policies with the
+same random numbers. "Road-only screening" is the v1 design (absolute rule at the road station); "with allowance" the
+same rule with the Second Schedule discretion allowance; "RCS v2 road stops" the share still sent to a static scale on
+the road when `token_coverage` of the trucks carry a port token; "RCS v2 port re-weigh" the share held at the port
+gate-out node. Read it honestly: v2 moves the near-limit checks from the road to the port rather than deleting them
+(the sum of the two v2 columns is close to the v1 column). The last column is the road truck-hours saved per day.
+
+*Mixed traffic at the first station.* Rows are token coverage of the traffic (port and origin streams combined).
+"Sent to the lane" and "sent to a static scale" are shares of all trucks at the first road station; the road-only
+baseline is the static share of the same population under the v1 rule (audits excluded). "Later station" columns show
+what remains once every truck carries a token: audits and mismatches go to the lane, almost nothing to a static scale.
+`untokened_lane` and `untokened_static` in the API output are shares **of untokened trucks only** (the "untokened trucks
+alone" sentence of the plan).
+
+Expected figures at the defaults (seed 1, 600 000 trucks): 85 % loading → road-only 23.2 %, with allowance 10.8 %,
+v2 road 5.3 %, port re-weigh 14.8 %, about 143 truck-hours a day; 90 % coverage → lane 5.3 %, static 1.5 %, about
+144 truck-hours a day at the first station. These match the plan's Monte Carlo to within a few tenths of a point.
+
+### 7.4 Experiments and the gate
+
+`sweep` varies one factor (Section 10.4 factor list: loading, port and road error, coverage, audit share, allowance,
+overload share, lane margin, legal-grade flags). `replicate` runs 30 seeds and reports Student-t 95 % confidence
+intervals; at 200 000 trucks the half-widths are a few hundredths of a point, so seed noise is never the reason two
+policies differ. `tornado` ranks the factors by how far they move the v2 road stop share: token coverage dominates,
+then the audit rate, then average loading; port error and the allowance barely move the road share (they move the
+port re-weigh share instead). `evaluate_gate` applies Section 10.9: proceed to the shadow pilot only when the model cuts
+the road stop share by at least 10 points against the baseline (a measured baseline once Phase 2 data exists), the
+false-clear rate is at or below 1 %, the port re-weigh share is practical for KPA (20 % placeholder threshold to agree)
+and one verification lane covers the peak.
+
+### 7.5 Limitations
+
+- Loads are a capped normal with an assumed spread; the real distribution must come from KeNHA weighbridge logs.
+- Scale errors are independent Gaussian relative errors; temperature drift, speed dependence and correlated faults are
+  left to the L1 sensor model and the SimPy station model.
+- The plan's numbers assume all port trucks pass the port node; trucks re-weighed at the port are assumed corrected and
+  tokened, so their later road check is a consistency check only.
+- Fraud (plate swaps, cargo added after the first weighing) and legitimate weight changes (partial offloads, fuel use)
+  are not modelled; the design covers them with audits, validity windows and tolerances.
+- No queues: the lane capacity check compares a peak-hour demand with a headway-based capacity, nothing more. Queue
+  stability is the SimPy model's job.
+- Every number is modelled under the stated assumptions and is to be replaced by measured data in the baseline study.
+
+Tests: `packages/simulation/tests/test_rcs_v2.py` (contract shape, determinism, monotonic responses to loading,
+coverage, allowance and legal-grade flags, false-clear target, lane capacity, truck-hour formula, sweep, replications,
+tornado, gate, CLI).
+
+## 8. RCS v2 in the SimPy station model (policy `rcs_v2`)
+
+The station queue model gains a third policy beside `all_stop` and `rolling`:
+
+```
+arrivals ──► [WIM screening node] ──GREEN (token consistent, or clear with margin)──► exit
+                       │── AMBER ──► [rolling verification lane, lane_bays, ~1.5 min, no stop] ──GREEN──► exit
+                       │                                                │── AMBER / RED ──► [static scale] ──► …
+                       │── RED   ──► [static scale] ──► [inspection bay] ──► exit
+```
+
+| Field | Meaning | Default |
+|---|---|---|
+| `token_coverage` | share of arriving trucks with a port or origin Load Compliance Token | 0.9 |
+| `token_port_share` | of the tokened trucks, share from the port (rest: approved origin scales) | 0.6 |
+| `token_error` | relative 1-sigma error of the scale behind the token | 0.01 |
+| `cargo_change_prob` | tokened trucks whose load changed after the token; the consistency check sends them to the lane | 0.02 |
+| `lane_bays`, `lane_service_median_s`, `lane_service_sigma` | rolling verification lane resource; a pass is lane time, not a stop | 1, 90 s, 0.3 |
+| `lane_rel_uncertainty` | expanded (k = 2) relative uncertainty of the lane's per-wheel scales | 0.01 |
+| `lane_closures` | `((start_s, duration_s), …)`: while closed, AMBER falls back to the static scale as in v1 | `()` |
+
+The decision at the screening node is the production engine with a `TokenInput` (`clearance_engine.decide`, engine
+`clr-2.0.0`): a valid, consistent token downgrades the near-limit AMBER rules, so the road only confirms that the weight
+is unchanged. A truck routed to the lane is re-decided with the lane measurement (`node_kind="verification_lane"`); only
+AMBER/RED out of the lane stops at the static scale. New per-truck fields: `stream`, `route`, `lane_pass`,
+`wait_lane_s`; new metrics: `pct_lane`, `pct_tokened`, `mean_wait_lane_s`, `max_queue_lane`, `lane_utilisation`; the
+comparison report has a "% via verification lane" column.
+
+Scenarios: `rcs_v2_untokened`, `rcs_v2_tokens_50`, `rcs_v2_tokens_90`, `rcs_v2_allowance_5pct` (limits with the 5 %
+Second Schedule allowance), `rcs_v2_lane_closure` (lane closed for 2 h mid-run).
+
+```bash
+kifaru-sim run --scenarios rolling_clearance,rcs_v2_untokened,rcs_v2_tokens_90,rcs_v2_lane_closure --hours 12 --reps 5
+```
+
+Caveat: the station model keeps the v1 truck population (`overload_prob` 0.15, synthetic arrivals), so its absolute
+shares differ from the plan-calibrated chain model in section 7 (1.5 % overloaded, loads capped at the limit). Use the
+chain model for the Section 9 figures and the station model for queues, lane capacity and closure behaviour. Both are
+modelled; neither is a measurement.

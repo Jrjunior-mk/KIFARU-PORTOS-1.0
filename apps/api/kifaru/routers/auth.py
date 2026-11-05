@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from ..config import get_settings
-from ..deps import CurrentUser, DbDep, audit, rate_limit
+from ..deps import CurrentUser, DbDep, audit, invalidate_user_cache, rate_limit
 from ..events import EventType, publish
 from ..models import Organization, RefreshSession, Role, User, UserPII, utcnow
 from ..pii import encrypt
@@ -196,6 +196,7 @@ def mfa_setup(p: CurrentUser, db: DbDep):
     secret = new_totp_secret()
     p.user.mfa_secret = secret
     db.commit()
+    invalidate_user_cache(p.user.id)
     return MfaSetupOut(secret=secret, otpauth_uri=totp_uri(secret, p.user.email))
 
 
@@ -210,6 +211,7 @@ def mfa_enable(body: MfaCodeIn, p: CurrentUser, db: DbDep):
     p.user.mfa_enabled = True
     audit(db, p, "mfa_enable", "user", p.user.id)
     db.commit()
+    invalidate_user_cache(p.user.id)
 
 
 @router.post("/mfa/verify", response_model=TokenOut)

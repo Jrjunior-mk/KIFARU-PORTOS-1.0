@@ -67,7 +67,7 @@ export interface VehicleOut {
   id: string; org_id: string; fleet_id: string | null; plate: string; make: string | null; model: string | null;
   axle_config: string; class_code: string; tare_kg: number; max_gvm_kg: number; payload_capacity_kg: number;
   body_type: string; status: string; rfid_epcs: string[]; last_lat: number | null; last_lon: number | null;
-  last_seen_at: string | null; watchlisted: boolean;
+  last_seen_at: string | null; watchlisted: boolean; trust_tier?: number | null; demerit_points?: number | null;
 }
 export interface PositionIn { lat: number; lon: number }
 export interface DriverOut { id: string; org_id: string; full_name: string; license_class: string | null; status: string }
@@ -79,18 +79,25 @@ export interface SensorOut {
   id: string; kind: string; serial: string | null; channel: number | null; install_position_m: number | null;
   status: SensorStatus; health_reason: string | null; last_reading_at: string | null; calibration_valid_to: string | null;
 }
+export type LaneType = 'wim_highspeed' | 'wim_lowspeed' | 'static' | 'port_gateout' | 'origin_scale' | 'rolling_verification';
+export const LANE_TYPES: LaneType[] = ['wim_highspeed', 'wim_lowspeed', 'static', 'port_gateout', 'origin_scale', 'rolling_verification'];
+export type StationKind = 'road_station' | 'port_gate' | 'origin_site';
+export const STATION_KINDS: StationKind[] = ['road_station', 'port_gate', 'origin_site'];
+export type NodeKind = 'port_gateout' | 'origin' | 'road_mainline' | 'verification_lane' | 'static';
+export type Stream = 'port' | 'origin' | 'untokened';
+export type Route = 'continue' | 'verification_lane' | 'static_scale' | 'port_reweigh' | 'hold';
 export interface LaneOut {
-  id: string; lane_no: number; type: 'wim_highspeed' | 'wim_lowspeed' | 'static' | string; direction: string; status: string;
-  device_id: string | null; calibration_valid_to: string | null; sensors: SensorOut[];
+  id: string; lane_no: number; type: LaneType | string; direction: string; status: string;
+  device_id: string | null; calibration_valid_to: string | null; sensors: SensorOut[]; legal_grade?: boolean;
 }
 export interface StationOut {
   id: string; code: string; name: string; lat: number; lon: number; capacity_per_hour: number; static_capacity_per_hour: number;
   alt_allowed: boolean; status: 'operational' | 'degraded' | 'offline' | string; lanes: LaneOut[]; queue_len: number; avg_wait_s: number;
-  utilisation: number; decisions_last_hour: Record<Decision, number>;
+  utilisation: number; decisions_last_hour: Record<Decision, number>; kind?: StationKind | string;
 }
-export interface StationIn { code: string; name: string; lat: number; lon: number; capacity_per_hour: number; static_capacity_per_hour: number; alt_allowed: boolean }
+export interface StationIn { code: string; name: string; lat: number; lon: number; capacity_per_hour: number; static_capacity_per_hour: number; alt_allowed: boolean; kind?: StationKind }
 export interface StationStatusIn { status: 'operational' | 'degraded' | 'offline'; reason?: string | null }
-export interface LaneIn { lane_no: number; type: 'wim_highspeed' | 'wim_lowspeed' | 'static'; direction: string; device_id?: string | null }
+export interface LaneIn { lane_no: number; type: LaneType; direction: string; device_id?: string | null; legal_grade?: boolean }
 export interface SensorHealthIn { status: 'ok' | 'degraded' | 'fault'; reason?: string | null }
 export type CalibrationMethod = 'reference_vehicle' | 'static_scale_comparison' | 'shunt' | 'bench';
 export interface CalibrationIn {
@@ -110,10 +117,17 @@ export interface GroupMargin {
   group_no: number; axles: number; measured_kg: number; u_kg: number; limit_kg: number; limit_with_tolerance_kg: number;
   status: 'over' | 'marginal' | 'ok';
 }
+export interface TokenMargin {
+  token_ref?: string; source?: string; trust_tier?: number; token_gvm_kg?: number; measured_kg?: number; diff_kg?: number; tolerance_kg?: number; tolerance_pct?: number;
+  consistent?: boolean; status?: string; [k: string]: unknown;
+}
+export interface DimensionMargin { length_m?: number | null; width_m?: number | null; height_m?: number | null; max_length_m?: number; max_width_m?: number; max_height_m?: number; lifted_axle?: boolean; permit_ref?: string | null; status?: string; [k: string]: unknown }
 export interface Margins {
   gvm?: Record<string, number | string | undefined>;
   groups?: GroupMargin[];
   declaration?: { expected_gvm_kg: number; diff_kg: number; tolerance_kg: number };
+  token?: TokenMargin;
+  dimensions?: DimensionMargin;
   [k: string]: unknown;
 }
 export interface DecisionOut {
@@ -121,25 +135,100 @@ export interface DecisionOut {
   audit_selected: boolean; evidence_hash: string; decided_at: string; latency_ms: number; explanation: string;
   static_verified_gvm_kg: number | null; override_reason: string | null; ticket_id: string | null;
   ticket_type: 'prescreen' | 'static_certified' | null; qr_token: string | null;
+  route?: Route | string | null; token_checked_ref?: string | null; token_issued_ref?: string | null; fee_preview_usd?: number | null;
 }
 export interface WeighingOut {
   id: string; station_id: string; lane_id: string; vehicle_id: string | null; plate: string | null; shipment_id: string | null;
   occurred_at: string; speed_mps: number; gvm_kg: number; gvm_uncertainty_kg: number; axle_count: number;
   detected_axle_config: string | null; class_code: string | null; quality_flags: string[]; sensor_health: Record<string, string>;
   pavement_temp_c: number | null; source: Source; kind: string; axles: AxleOut[]; identity: IdentityOut | null; decision: DecisionOut | null;
+  node_kind?: NodeKind | string | null; stream?: Stream | string | null; length_m?: number | null; width_m?: number | null; height_m?: number | null;
+  lifted_axle?: boolean | null; token_id?: string | null; token_ref?: string | null;
 }
 export interface StatsOut { total: number; by_decision: Record<Decision, number>; by_source: Record<string, number>; mean_latency_ms: number; green_rate: number; stops_avoided: number }
 export interface SimulateIn {
   lane_id: string; count: number; overload_prob: number; sensor_fault_prob: number; anpr_misread_prob: number; rfid_missing_prob: number;
   clone_prob: number; unregistered_prob: number; pavement_temp_c: number; vehicle_id?: string | null; force_gvm_kg?: number | null; seed?: number | null;
+  oversize_prob?: number; lifted_axle_prob?: number;
 }
 export interface StaticVerifyIn { static_gvm_kg: number; axle_loads_kg?: number[] | null; notes?: string | null }
 export interface OverrideIn { reason: string }
+export interface FeeSchedule { currency: 'USD' | string; points: [number, number][]; detention_free_days: number; detention_usd_per_day: number; repeat_offence_multiplier: number; note: string }
 export interface LimitsOut {
   version: string; steering_single_kg: number; single_drive_kg: number; tandem_kg: number; tridem_kg: number; gvm_max_kg: number;
   axle_tolerance_pct: number; gvm_tolerance_pct: number; green_safety_margin_kg: number; identity_min_confidence: number;
-  audit_sample_rate: number; notes: string;
+  audit_sample_rate: number; notes: string | string[];
+  discretion_allowance_pct?: number; max_length_m?: number; max_width_m?: number; max_height_m?: number; fee_schedule?: FeeSchedule;
 }
+
+// ---------------------------------------------------------------- RCS v2 (port-anchored clearance registry)
+export type TokenSource = 'port' | 'origin' | 'road' | 'lane';
+export type TokenStatus = 'active' | 'expired' | 'suspended' | 'revoked';
+export interface TrustTierOut { tier: 1 | 2 | 3 | 4 | number; source: 'port' | 'origin' | 'road' | 'onboard' | string; label: string; audit_rate: number; description: string }
+export interface LegalHook { reg: string; says: string; consequence: string }
+export interface RcsPolicyOut {
+  limits_version: string; engine_version: string; discretion_allowance_pct: number;
+  token_tolerance: { port: number; origin: number; lane: number; road: number };
+  token_validity_hours: { port: number; origin: number; lane: number; road: number };
+  trust_tiers: TrustTierOut[]; fee_schedule: FeeSchedule;
+  dimension_limits: { max_length_m: number; max_width_m: number; max_height_m: number };
+  reported_gvm_by_axles: Record<string, number>; legal_hooks: LegalHook[]; notes: string[];
+}
+export interface TokenDimensions { length_m: number | null; width_m: number | null; height_m: number | null }
+export interface TokenOut {
+  id: string; token_ref: string; vehicle_id: string | null; plate: string | null; trailer_plate: string | null; rfid_epc: string | null;
+  container_number: string | null; seal_id: string | null; shipment_id: string | null;
+  source: TokenSource | string; trust_tier: number; gvm_kg: number; expected_gvm_kg: number | null; variance_kg: number | null;
+  axle_group_loads_kg: number[]; axle_config: string | null; dimensions: TokenDimensions | null;
+  permit_ref: string | null; release_status: Record<string, string>; route: string | null; destination: string | null; driver_id: string | null;
+  issued_at: string; expires_at: string; issuing_station_id: string; issuing_station_code: string; issuing_event_id: string;
+  status: TokenStatus | string; honoured_count: number; last_honoured_at: string | null; suspended_reason: string | null;
+  signature: string; signer_key_id: string; signature_valid: boolean; source_label: string;
+}
+export interface TokenVerifyOut {
+  valid: boolean; status: string | null; plate: string | null; source: string | null; trust_tier: number | null; gvm_kg: number | null;
+  issued_at: string | null; expires_at: string | null; issuing_station: string | null; honoured_count: number | null; signature_valid: boolean;
+  source_label: string | null; note: string | null;
+}
+export interface ReleaseOrderIn { weighing_event_id: string; static_gvm_kg?: number | null; transit: boolean; hazardous: boolean; perishable: boolean; journey_ref?: string | null; notes?: string | null }
+export type ReleaseOrderStatus = 'issued' | 'paid' | 'closed';
+export interface ReleaseOrderOut {
+  id: string; order_ref: string; vehicle_id: string | null; plate: string | null; weighing_event_id: string; decision_id: string; station_code: string;
+  measured_gvm_kg: number; allowed_gvm_kg: number; allowance_kg: number; adjusted_gvm_kg: number; overload_kg: number;
+  fee_usd: number; fee_multiplier: number; repeat_offence: boolean; detention_days: number; detention_usd: number; total_usd: number;
+  transit: boolean; customs_notified: boolean; hazardous: boolean; perishable: boolean;
+  officer_user_id: string; officer_name: string | null; officer_signature: string; status: ReleaseOrderStatus | string; issued_at: string; valid_until: string;
+  journey_ref: string | null; notes: string | null; source_label: string;
+}
+export interface PermitIn { vehicle_id: string; reference: string; max_length_m: number; max_width_m: number; max_height_m: number; max_gvm_kg: number | null; valid_from: string; valid_to: string; route: string | null }
+export interface PermitOut extends PermitIn { id: string; plate: string; status: 'valid' | 'expired' | 'future' | string }
+export interface RcsStationStats { station_id: string; code: string; kind: string; total: number; routes: Record<string, number>; lane_share: number; static_share: number }
+export interface RcsStatsOut {
+  total: number; by_stream: { port: number; origin: number; untokened: number };
+  by_route: { continue: number; verification_lane: number; static_scale: number; port_reweigh: number; hold: number };
+  token_coverage: number; tokens_active: number; tokens_issued_by_source: Record<string, number>; honoured_total: number;
+  release_orders_open: number; per_station: RcsStationStats[];
+}
+export interface RcsModelIn {
+  avg_loading_pct: number; load_spread_pct: number; overload_prob: number; token_coverage: number;
+  stream_mix: { port: number; origin: number; untokened: number };
+  port_error_pct: number; origin_error_pct: number; road_error_pct: number; lane_error_pct: number; lane_margin_pct: number;
+  allowance_pct: number; audit_rate: number; port_legal_grade: boolean; lane_legal_grade: boolean;
+  trucks_per_day: number; stop_minutes: number; lane_minutes: number; peak_per_hour: number; n: number; seed: number;
+}
+export interface RcsModelShares {
+  road_only_static: number; road_only_with_allowance: number; v2_road_static: number; v2_port_reweigh: number;
+  first_station_lane: number; first_station_static: number; later_station_lane: number; later_station_static: number;
+  untokened_lane: number; untokened_static: number;
+}
+export interface RcsModelOut {
+  inputs: RcsModelIn; shares: RcsModelShares; truck_hours_saved_per_day: number; truck_hours_saved_first_station: number; false_clear_rate: number;
+  lane_peak_per_hour: number; lane_capacity_per_hour: number; lane_ok: boolean; total_reweighs_v1: number; total_reweighs_v2: number;
+  assumptions: string[]; label: 'MODELLED' | string;
+}
+export interface RcsSweepIn { factor: keyof RcsModelIn; values: number[]; base: Partial<RcsModelIn> }
+export type RcsSweepRow = { value: number } & RcsModelShares & { truck_hours_saved_per_day: number; truck_hours_saved_first_station: number; false_clear_rate: number };
+export interface RcsSweepOut { factor: string; rows: RcsSweepRow[]; label: 'MODELLED' | string }
 
 // ---------------------------------------------------------------- tickets
 export interface TicketPayload {
@@ -147,6 +236,7 @@ export interface TicketPayload {
   plate: string | null; vehicle_id: string | null; shipment_id: string | null; gvm_kg: number; gvm_uncertainty_kg: number | null;
   axles: { i: number; kg: number; u_kg: number; group: number }[]; axle_config: string | null; decision: Decision; limits_version: string;
   engine_version: string; evidence_hash: string; source: Source; signer_key_id: string; public_key: string;
+  token_ref?: string | null; route?: string | null; node_kind?: string | null;
 }
 export interface TicketOut { id: string; type: 'prescreen' | 'static_certified' | string; payload: TicketPayload; signature: string; signer_key_id: string; qr_token: string; signature_valid: boolean }
 export interface VerifyOut {
@@ -272,4 +362,5 @@ export interface LiveEvent {
 export interface ClearancePayload {
   weighing_event_id: string; decision_id: string; decision: Decision; plate: string | null; gvm_kg: number; u_kg: number; axle_config: string | null;
   lane_id: string; latency_ms: number; source: Source; rules_fired: string[];
+  route?: Route | string | null; token_ref?: string | null; stream?: Stream | string | null; node_kind?: NodeKind | string | null; instruction?: string; station_code?: string;
 }

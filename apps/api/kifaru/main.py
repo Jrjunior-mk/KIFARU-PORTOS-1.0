@@ -21,6 +21,7 @@ from .routers import (
     integrations,
     notifications,
     queue,
+    rcs,
     shipments,
     stations,
     tickets,
@@ -35,6 +36,9 @@ API_DESCRIPTION = """
 **Kenya Intelligent Freight, Access, Routing & Unified Logistics Platform** — backend API.
 
 * Rolling clearance (WIM pre-screen -> deterministic GREEN/AMBER/RED). The static scale remains the legal reference.
+* RCS v2 port-anchored clearance: Load Compliance Tokens issued at the first trusted weighing point (port gate-out, approved
+  origin scale, first road station or rolling verification lane) and honoured downstream; Reg 14 release orders; permits;
+  trust tiers; a Monte Carlo chain model (`/rcs/model`, modelled only).
 * Digital cargo passport, signed weighing tickets with QR verification, hash-chained ledger.
 * Queue forecasting and slot booking, backhaul marketplace, environmental estimates (modelled).
 * Every record carries `source` = `live` | `simulated` | `replay`. Simulated data is never presented as live.
@@ -79,7 +83,7 @@ def create_app() -> FastAPI:
         return JSONResponse({"detail": "Internal server error"}, status_code=500)
 
     prefix = "/api/v1"
-    for r in (auth, fleet, stations, weighing, tickets, shipments, queue, backhaul, notifications, environment, integrations, admin, events_api):
+    for r in (auth, fleet, stations, weighing, tickets, shipments, queue, backhaul, notifications, environment, integrations, admin, events_api, rcs):
         app.include_router(r.router, prefix=prefix)
     app.include_router(ws.router)
 

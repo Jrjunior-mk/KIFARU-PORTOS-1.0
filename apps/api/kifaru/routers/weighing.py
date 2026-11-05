@@ -9,7 +9,7 @@ from sqlalchemy import func, select
 from ..config import get_settings
 from ..deps import CurrentUser, DbDep, Principal, audit, org_scope, require_roles
 from ..events import EventType, publish
-from ..models import ClearanceDecision, Lane, Vehicle, WeighingEvent
+from ..models import ClearanceDecision, Lane, LoadComplianceToken, Vehicle, WeighingEvent
 from ..services import ledger, tickets
 from ..services.limits import DEFAULT_LIMITS
 from ..services.simulator import SimOptions, simulate_pass
@@ -54,6 +54,10 @@ class DecisionOut(BaseModel):
     ticket_id: str | None
     ticket_type: str | None
     qr_token: str | None
+    route: str = "continue"
+    token_checked_ref: str | None = None
+    token_issued_ref: str | None = None
+    fee_preview_usd: float | None = None
 
 
 class WeighingOut(BaseModel):
@@ -78,6 +82,21 @@ class WeighingOut(BaseModel):
     axles: list[AxleOut]
     identity: IdentityOut | None
     decision: DecisionOut | None
+    node_kind: str = "road_mainline"
+    stream: str = "untokened"
+    length_m: float | None = None
+    width_m: float | None = None
+    height_m: float | None = None
+    lifted_axle: bool = False
+    token_id: str | None = None
+    token_ref: str | None = None
+
+
+def _token_ref(db, token_id: str | None) -> str | None:
+    if not token_id:
+        return None
+    t = db.get(LoadComplianceToken, token_id)
+    return t.token_ref if t else None
 
 
 def _out(db, ev: WeighingEvent, plates: dict[str, str] | None = None) -> WeighingOut:
@@ -97,6 +116,8 @@ def _out(db, ev: WeighingEvent, plates: dict[str, str] | None = None) -> Weighin
         occurred_at=ev.occurred_at, speed_mps=ev.speed_mps, gvm_kg=ev.gvm_kg, gvm_uncertainty_kg=ev.gvm_uncertainty_kg,
         axle_count=ev.axle_count, detected_axle_config=ev.detected_axle_config, class_code=ev.class_code, quality_flags=ev.quality_flags,
         sensor_health=ev.sensor_health, pavement_temp_c=ev.pavement_temp_c, source=ev.source, kind=ev.kind,
+        node_kind=ev.node_kind or "road_mainline", stream=ev.stream or "untokened", length_m=ev.length_m, width_m=ev.width_m, height_m=ev.height_m,
+        lifted_axle=bool(ev.lifted_axle), token_id=ev.token_id, token_ref=_token_ref(db, ev.token_id),
         axles=[AxleOut(axle_index=a.axle_index, load_kg=a.load_kg, uncertainty_kg=a.uncertainty_kg, spacing_to_next_m=a.spacing_to_next_m, group_no=a.group_no) for a in ev.axles],
         identity=IdentityOut(anpr_plate=ident.anpr_plate, anpr_confidence=ident.anpr_confidence, rfid_epc=ident.rfid_epc, rfid_confidence=ident.rfid_confidence,
                              confidence=ident.confidence, method=ident.method, explanation=ident.explanation) if ident else None,
@@ -104,7 +125,9 @@ def _out(db, ev: WeighingEvent, plates: dict[str, str] | None = None) -> Weighin
                              engine_version=d.engine_version, audit_selected=d.audit_selected, evidence_hash=d.evidence_hash, decided_at=d.decided_at,
                              latency_ms=d.latency_ms, explanation=d.explanation, static_verified_gvm_kg=d.static_verified_gvm_kg,
                              override_reason=d.override_reason, ticket_id=d.ticket.id if d.ticket else None, ticket_type=d.ticket.type if d.ticket else None,
-                             qr_token=d.ticket.qr_token if d.ticket else None) if d else None,
+                             qr_token=d.ticket.qr_token if d.ticket else None, route=d.route or "continue",
+                             token_checked_ref=_token_ref(db, d.token_checked_id), token_issued_ref=_token_ref(db, d.token_issued_id),
+                             fee_preview_usd=d.fee_preview_usd) if d else None,
     )
 
 
@@ -151,19 +174,23 @@ class StatsOut(BaseModel):
 
 @router.get("/stats", response_model=StatsOut)
 def stats(p: CurrentUser, db: DbDep, station_id: str | None = None):
-    q = select(ClearanceDecision.decision, func.count()).join(WeighingEvent, WeighingEvent.id == ClearanceDecision.weighing_event_id)
+    # one grouped query (decision x source with count and mean latency): the database may be remote, round trips are expensive
+    q = (
+        select(ClearanceDecision.decision, WeighingEvent.source, func.count(), func.avg(ClearanceDecision.latency_ms))
+        .join(WeighingEvent, WeighingEvent.id == ClearanceDecision.weighing_event_id)
+    )
     if station_id:
         q = q.where(WeighingEvent.station_id == station_id)
     by = {"GREEN": 0, "AMBER": 0, "RED": 0}
-    for d, c in db.execute(q.group_by(ClearanceDecision.decision)).all():
-        by[d] = c
-    qs = select(WeighingEvent.source, func.count())
-    if station_id:
-        qs = qs.where(WeighingEvent.station_id == station_id)
-    by_source = {s: c for s, c in db.execute(qs.group_by(WeighingEvent.source)).all()}
-    lat = db.execute(select(func.avg(ClearanceDecision.latency_ms))).scalar() or 0.0
-    total = sum(by.values())
-    return StatsOut(total=total, by_decision=by, by_source=by_source, mean_latency_ms=float(lat), green_rate=(by["GREEN"] / total) if total else 0.0, stops_avoided=by["GREEN"])
+    by_source: dict[str, int] = {}
+    lat_sum, total = 0.0, 0
+    for d, src, c, lat in db.execute(q.group_by(ClearanceDecision.decision, WeighingEvent.source)).all():
+        by[d] = by.get(d, 0) + c
+        by_source[src] = by_source.get(src, 0) + c
+        lat_sum += float(lat or 0.0) * c
+        total += c
+    return StatsOut(total=total, by_decision=by, by_source=by_source, mean_latency_ms=(lat_sum / total) if total else 0.0,
+                    green_rate=(by["GREEN"] / total) if total else 0.0, stops_avoided=by["GREEN"])
 
 
 class EdgeIngestIn(BaseModel):
@@ -208,6 +235,8 @@ class SimulateIn(BaseModel):
     vehicle_id: str | None = None
     force_gvm_kg: int | None = Field(default=None, ge=1000, le=90000)
     seed: int | None = None
+    oversize_prob: float = Field(default=0.02, ge=0, le=1)
+    lifted_axle_prob: float = Field(default=0.02, ge=0, le=1)
 
 
 @router.post("/simulate", response_model=list[WeighingOut], status_code=201)
@@ -221,7 +250,7 @@ def simulate(body: SimulateIn, db: DbDep, p: Principal = Depends(OPS)):
         opts = SimOptions(overload_prob=body.overload_prob, sensor_fault_prob=body.sensor_fault_prob, anpr_misread_prob=body.anpr_misread_prob,
                           rfid_missing_prob=body.rfid_missing_prob, clone_prob=body.clone_prob, unregistered_prob=body.unregistered_prob,
                           pavement_temp_c=body.pavement_temp_c, vehicle_id=body.vehicle_id, force_gvm_kg=body.force_gvm_kg,
-                          seed=None if body.seed is None else body.seed + i)
+                          seed=None if body.seed is None else body.seed + i, oversize_prob=body.oversize_prob, lifted_axle_prob=body.lifted_axle_prob)
         ev = simulate_pass(db, lane, opts)
         db.commit()
         out.append(_out(db, ev))
@@ -289,4 +318,6 @@ def limits():
     return {"version": lim.version, "steering_single_kg": lim.steering_single_kg, "single_drive_kg": lim.single_drive_kg, "tandem_kg": lim.tandem_kg,
             "tridem_kg": lim.tridem_kg, "gvm_max_kg": lim.gvm_max_kg, "axle_tolerance_pct": lim.axle_tolerance_pct, "gvm_tolerance_pct": lim.gvm_tolerance_pct,
             "green_safety_margin_kg": lim.green_safety_margin_kg, "identity_min_confidence": s.identity_min_confidence,
-            "audit_sample_rate": s.audit_sample_rate, "notes": lim.notes}
+            "audit_sample_rate": s.audit_sample_rate, "notes": lim.notes,
+            "discretion_allowance_pct": lim.discretion_allowance_pct, "max_length_m": lim.max_length_m, "max_width_m": lim.max_width_m,
+            "max_height_m": lim.max_height_m, "fee_schedule": lim.fee_schedule()}

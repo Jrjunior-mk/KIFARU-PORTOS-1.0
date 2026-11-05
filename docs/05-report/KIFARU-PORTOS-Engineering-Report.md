@@ -1521,4 +1521,105 @@ Row: `event_id, seq, type, payload, station_id, producer, prev_hash, hash, signa
 | KeNHA / KPA / KRA / NTSA | Kenya National Highways Authority / Kenya Ports Authority / Kenya Revenue Authority / National Transport and Safety Authority |
 | RTM | Requirements traceability matrix |
 
+# 43. RCS v2 — Port-anchored clearance (addendum)
+
+Added 2026-11-05. Source documents: `docs/01-requirements/rcs-v2-port-anchored-clearance.md`,
+`docs/01-requirements/legal-hooks-eac-vlc-2018.md`, `docs/02-architecture/rcs-v2-api-contract.md`,
+`docs/06-operations/rcs-v2-simulation-plan.md`, `docs/03-hardware/rolling-verification-lane.md`,
+`docs/03-hardware/port-gateout-weigh-node.md`. Evidence tags as in §7.3: [R] in the repository, [D] designed, [M] modelled.
+
+## 43.1 The redesign
+
+The v1 concept (§8.3, §18.3) weighs trucks on the highway and pre-screens them against the legal limit. RCS v2 moves the
+first weighing to each truck's first trusted point and lets later stations honour that result:
+
+- **Three truck streams.** Port trucks are weighed at a port gate-out node beside the i-Gate; industrial origin trucks
+  (mines, quarries, cement, sugar, fuel depots, farms, factories) at an approved loading-site scale; untokened trucks at
+  the first road station or the Rolling Verification Lane. [R] `WeighingEvent.stream`, `node_kind`.
+- **Load Compliance Token.** A signed record (plate, trailer, tag, container, seal, axle-group loads, gross, expected
+  weight and variance, gate, validity window, release-status snapshot, route, driver, source, trust tier, dimensions,
+  permit reference) issued on GREEN at the first verified weighing point and honoured downstream until it expires or a
+  consistency check fails. [R] `LoadComplianceToken`, `services/tokens.py`, `/api/v1/rcs/tokens`.
+- **Consistency instead of accuracy for tokened trucks.** At a road node the reading only has to confirm the weight is
+  unchanged (tolerance 8 % for port, origin and lane tokens, 11 % for road tokens); the near-limit "possible over"
+  rules are downgraded when a valid, consistent token exists, while "certainly over" remains RED. [R] engine
+  `clr-2.0.0` rules `TOKEN_*`, `TOKEN_COVERS_MARGIN`.
+- **Rolling Verification Lane.** A lane beside each station where doubtful trucks and audits roll through at about
+  10 km/h over per-wheel scales, under a LiDAR dimension portal and cameras; about 370 trucks an hour, roughly 25
+  static lanes. [D] lane type `rolling_verification`, route `verification_lane`.
+- **Parameters beyond weight.** Height, width, length, lifted axles, per-wheel balance, permits, earlier certificates
+  and release orders, e-seal status, hazardous and perishable flags, fee computation and calibration status. [R] rules
+  `DIMENSION_OVER`, `DIMENSION_PERMITTED`, `LIFTED_AXLE`; `SpecialLoadPermit`; `ReleaseOrder`.
+- **Trust tiers.** Tier 1 port node (audit 1–3 %), tier 2 approved origin scale (3–5 %, falling with a clean record),
+  tier 3 road node or lane (3 %), tier 4 on-board record only (always verified in the lane). [R] `audit_rate_by_tier`.
+
+## 43.2 Legal basis
+
+The EAC Vehicle Load Control (Enforcement Measures) Regulations, 2018 give the hooks: Reg 10(2) excuses vehicles
+previously confirmed within limits by screening devices from producing a paper certificate (the digital token);
+Reg 10(4) requires certificates to be tamper-evident (Ed25519 signatures, hash-chained ledger); Reg 14 makes a release
+order travel with the journey and triples the fee on a repeat overload (digital release-order registry); Reg 18 ties
+transit overloads to customs; Reg 5 requires weights-and-measures approval of scales (`Lane.legal_grade`); Reg 6 and 8
+require quarterly calibration and annual audit (calibration register). Two limits are never crossed: a screening
+reading cannot replace static weighing as proof of overload (Reg 4(6), 18(3)), and fees and release orders come from an
+authorised officer (Reg 3(4), 11(3)); the platform prepares the record and the officer e-signs under MFA. The
+discretion allowance (< 5 %, Second Schedule) and the Third Schedule fee table (5,000 kg over gross ≈ 2,990 USD;
+detention free for three days then 50 USD a day) are configuration flagged as indicative until confirmed with KeNHA.
+A legal opinion on these points is the exit condition of v2 Phase 0–1.
+
+## 43.3 Modelled effect [M]
+
+Monte Carlo chain model (`kifaru_sim.rcs_v2`), 600,000 trucks per row; 1.5 % overloaded, load spread 12 % of the limit
+capped just below it, port scale error 1 %, road scale error 2.5 %, 90 % token coverage, mismatch tolerance about 8 %,
+3 % audits. Shares are percentages of all trucks at the road station. Author's estimates; to be replaced with
+measured data.
+
+| Average load (% of limit) | Road-only screening | Road-only with 5 % allowance | RCS v2 road stops | RCS v2 port re-weigh | Road truck-hours saved per day (v1 to v2) |
+|---|---|---|---|---|---|
+| 75 % | 9.0 % | 5.7 % | 3.8 % | 4.2 % | about 42 |
+| 80 % | 14.4 % | 7.5 % | 4.4 % | 7.9 % | about 80 |
+| 85 % | 23.3 % | 10.9 % | 5.3 % | 14.9 % | about 144 |
+| 90 % | 35.5 % | 16.0 % | 6.5 % | 25.5 % | about 232 |
+
+Mixed traffic with a verification lane (error 1 %, margin 2 %), 85 % loading, lane pass 1.5 minutes, static stop
+6 minutes, shares of all trucks at the first station:
+
+| Trucks with a port or origin token | Sent to the lane | Sent to a static scale | Road-only baseline (static) | Truck-hours saved per day at the first station |
+|---|---|---|---|---|
+| 30 % | 17.3 % | 10.0 % | 20.9 % | about 53 |
+| 50 % | 13.3 % | 7.1 % | 20.9 % | about 84 |
+| 70 % | 9.3 % | 4.3 % | 20.9 % | about 114 |
+| 90 % | 5.2 % | 1.5 % | 20.9 % | about 145 |
+
+Reading it honestly: v2 does not delete the near-limit checks, it moves them from the public road to the port (at 85 %
+loading, 5.3 % on the road plus 14.9 % at the port versus 23.3 % on the road). The saving is relieved road queues and
+overloads fixed where correction is cheap. Legal-grade approval of the port scale or a 5 % allowance cuts the port
+re-weigh share to about 1.3 %; token coverage drives the road stop share (3.3 % at full coverage, 13.3 % at 50 %);
+port scale accuracy mainly moves the port share. Once every truck carries a token, later stations send about 3.3 % to
+the lane and almost none to a static scale. The lane peak (about 117 trucks an hour at 500 an hour mainline) is within
+one lane's capacity. Fraud (plate swaps, cargo added later) is not modelled and is covered by audits. Not counted:
+removed duplicate port checks, avoided fees and detention, customs benefit from misdeclaration detection.
+
+## 43.4 Simulation plan
+
+Four linked levels over about 16 weeks (`docs/06-operations/rcs-v2-simulation-plan.md`): L1 sensor and algorithm
+(quarter-car model, error curves by speed, load and temperature; `packages/wim_dsp`), L2 process (whole chain for three
+streams, SimPy; `kifaru_sim.rcs_v2`, policy `rcs_v2`, `kifaru_sim.experiments`), L3 road traffic (SUMO with TraCI,
+diverge and spillback; `kifaru_sim.sumo_adapter`), L4 system and hardware-in-the-loop (token service, mock agency APIs,
+Locust, MQTT, recorded signals replayed into the bench rig). Experiment design: factors loading, port and road error,
+token coverage, peak factor, outages, audit share; 30 replications of 30 days with 2-day warm-up and common random
+numbers; 95 % confidence intervals; KPIs stops per 1,000 trucks, mean and P95 delay, truck-hours a day, maximum queue,
+false-clear rate, port re-weigh load, yard dwell. Validation accepts the as-is model when mean delay is within about
+15 % of the measured baseline and peak queues align. Go/no-go gate before any hardware spend: at least a 10-point cut
+in the road stop share (or removal of recurring peak saturation), false-clear rate ≤ 1 %, port re-weigh volume
+practical for KPA; otherwise narrow to a vehicle-side or registry-only offering (`kifaru-sim v2-gate`).
+
+## 43.5 Status and what remains
+
+Implemented in software with simulated data: token service and registry APIs, engine rules, release orders, permits,
+dimension and lifted-axle handling, lane and node types, seed stations for a port gate, an origin site and verification
+lanes, the chain and station simulations, and the web registry and model pages (RTM section L). Not done: agency
+access and data requests, the legal opinion, scale approval, the lane and port node hardware, the baseline study, and
+validation of the model against measured data. No regulator has reviewed or agreed the design.
+
 *End of report.*

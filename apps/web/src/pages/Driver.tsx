@@ -4,20 +4,24 @@
  * one geolocation fix is sent on load (POST /fleet/vehicles/{id}/position).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { fleet as fleetApi, queue as queueApi, shipments as shipmentsApi, stations as stationsApi, weighing as weighingApi } from '../api/endpoints';
-import type { ClearancePayload, Decision, LiveEvent, VehicleOut, WeighingOut } from '../api/types';
+import { fleet as fleetApi, queue as queueApi, rcs as rcsApi, shipments as shipmentsApi, stations as stationsApi, weighing as weighingApi } from '../api/endpoints';
+import type { ClearancePayload, Decision, LiveEvent, Route, VehicleOut, WeighingOut } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { Badge, SourceBadge, Spinner } from '../components/ui';
 import { eventSource, useLiveEvents } from '../hooks/useLiveEvents';
 import { useQuery } from '../hooks/useQuery';
-import { fmtAgo, fmtClock, fmtDuration, fmtKg, titleCase } from '../lib/format';
+import { fmtAgo, fmtClock, fmtDateTime, fmtDuration, fmtKg, titleCase } from '../lib/format';
+import { ROUTE_INSTRUCTION, ROUTE_SPEECH, routeOf } from '../lib/rcs';
 
 const VEHICLE_KEY = 'kifaru.driver.vehicle';
 
-const DECISION_STYLE: Record<Decision, { bg: string; title: string; instruction: string; speech: string }> = {
-  GREEN: { bg: 'bg-decision-green', title: 'GREEN — PROCEED', instruction: 'Keep driving. No stop required.', speech: 'Green. Proceed. No stop required.' },
-  AMBER: { bg: 'bg-decision-amber', title: 'AMBER — STATIC SCALE', instruction: 'Divert to the static weighbridge lane for verification.', speech: 'Amber. Divert to the static scale for verification.' },
-  RED: { bg: 'bg-decision-red', title: 'RED — INSPECTION', instruction: 'Divert to the inspection bay and wait for an officer.', speech: 'Red. Divert to the inspection bay and wait for an officer.' },
+/** In-cab presentation keyed by route (RCS v2): the route decides where the truck goes, the decision colours it. */
+const ROUTE_STYLE: Record<Route, { bg: string; title: string }> = {
+  continue: { bg: 'bg-decision-green', title: 'GREEN — CONTINUE' },
+  verification_lane: { bg: 'bg-blue-700', title: 'AMBER — VERIFICATION LANE' },
+  static_scale: { bg: 'bg-decision-red', title: 'STATIC SCALE' },
+  port_reweigh: { bg: 'bg-decision-amber', title: 'AMBER — PORT RE-WEIGH' },
+  hold: { bg: 'bg-rose-900', title: 'RED — HOLD' },
 };
 
 export default function Driver() {
@@ -73,9 +77,12 @@ function DriverScreen({ vehicle, onChangeVehicle }: { vehicle: VehicleOut; onCha
 
   const latest: WeighingOut | null = eventsQ.data?.[0] ?? null;
   const decision: Decision | null = liveDecision?.payload.decision ?? latest?.decision?.decision ?? null;
+  const route: Route | null = routeOf(liveDecision?.payload.route ?? latest?.decision?.route, decision, liveDecision?.payload.node_kind ?? latest?.node_kind);
   const decisionAt = liveDecision?.at ?? latest?.occurred_at ?? null;
   const decisionSource = liveDecision?.source ?? latest?.source ?? null;
   const decisionKey = liveDecision ? liveDecision.payload.weighing_event_id : latest?.id ?? null;
+  const tokenQ = useQuery(() => rcsApi.tokenLookup(vehicle.plate), [vehicle.plate, decisionKey], { pollMs: 60_000 });
+  const token = tokenQ.error?.status === 404 ? null : tokenQ.data ?? null;
 
   const speak = useCallback((text: string) => {
     if (!speechOn || !('speechSynthesis' in window)) return;
@@ -85,8 +92,8 @@ function DriverScreen({ vehicle, onChangeVehicle }: { vehicle: VehicleOut; onCha
   useEffect(() => {
     if (!decision || !decisionKey) return;
     if (spokenRef.current === null) { spokenRef.current = decisionKey; return; } // do not announce the historical result on load
-    if (spokenRef.current !== decisionKey) { spokenRef.current = decisionKey; speak(`${DECISION_STYLE[decision].speech}`); }
-  }, [decision, decisionKey, speak]);
+    if (spokenRef.current !== decisionKey) { spokenRef.current = decisionKey; speak(route ? ROUTE_SPEECH[route] : ''); }
+  }, [decision, decisionKey, route, speak]);
 
   // One geolocation fix on load → telematics position.
   useEffect(() => {
@@ -100,7 +107,7 @@ function DriverScreen({ vehicle, onChangeVehicle }: { vehicle: VehicleOut; onCha
   const appt = useMemo(() => (apptsQ.data ?? []).filter((a) => a.vehicle_id === vehicle.id && (a.status === 'booked' || a.status === 'arrived')).sort((a, b) => a.slot_start.localeCompare(b.slot_start))[0] ?? null, [apptsQ.data, vehicle.id]);
   const station = useMemo(() => stationsQ.data?.find((s) => s.id === (appt?.station_id ?? latest?.station_id)) ?? null, [stationsQ.data, appt, latest]);
   const shipment = useMemo(() => (shipmentsQ.data ?? []).find((s) => s.vehicle_id === vehicle.id && !['delivered', 'closed'].includes(s.stage)) ?? null, [shipmentsQ.data, vehicle.id]);
-  const d = decision ? DECISION_STYLE[decision] : null;
+  const d = route ? ROUTE_STYLE[route] : null;
 
   return (
     <div className="mx-auto max-w-3xl space-y-4 text-lg">
@@ -118,7 +125,7 @@ function DriverScreen({ vehicle, onChangeVehicle }: { vehicle: VehicleOut; onCha
       <section aria-live="assertive" aria-atomic="true" className={`rounded-3xl p-8 text-white shadow-xl ${d ? d.bg : 'bg-slate-700'}`}>
         <div className="text-sm font-semibold uppercase tracking-widest opacity-90">Latest clearance</div>
         <div className="mt-2 text-5xl font-black leading-none sm:text-6xl">{d ? d.title : 'NO RESULT YET'}</div>
-        <div className="mt-4 text-2xl font-semibold">{d ? d.instruction : 'Your truck has not been weighed yet. Drive to your booked lane.'}</div>
+        <div className="mt-4 text-2xl font-semibold">{route ? ROUTE_INSTRUCTION[route] : 'Your truck has not been weighed yet. Drive to your booked lane.'}</div>
         {decisionAt && (
           <div className="mt-4 flex flex-wrap items-center gap-3 text-base opacity-95">
             <span>{fmtAgo(decisionAt)} · {station?.code ?? ''}</span>
@@ -128,9 +135,18 @@ function DriverScreen({ vehicle, onChangeVehicle }: { vehicle: VehicleOut; onCha
         )}
       </section>
 
+      <section className={`rounded-2xl border-2 px-5 py-4 ${token && token.status === 'active' ? 'border-brand-500 bg-brand-50 dark:bg-brand-900/30' : 'border-ink-300 dark:border-ink-700'}`} aria-label="Load Compliance Token">
+        <div className="text-sm uppercase tracking-wide text-ink-500 dark:text-ink-300">Load Compliance Token</div>
+        {tokenQ.loading && !token ? <Spinner label="Checking token" /> : token && token.status === 'active' ? (
+          <div className="mt-1 text-xl font-semibold">Token active until {fmtDateTime(token.expires_at)} · honoured at {token.honoured_count} station{token.honoured_count === 1 ? '' : 's'}<div className="text-base font-normal text-ink-600 dark:text-slate-300">Issued at {token.issuing_station_code} ({token.source}) · {fmtKg(token.gvm_kg)} · ref <span className="font-mono">{token.token_ref}</span>. Later stations only check that your weight is unchanged.</div></div>
+        ) : (
+          <div className="mt-1 text-xl font-semibold">No token: the first station issues one.<div className="text-base font-normal text-ink-600 dark:text-slate-300">{token ? `Your last token is ${token.status}. ` : ''}Keep to the signed speed through the screening lane; a GREEN there issues a road token that later stations honour.</div></div>
+        )}
+      </section>
+
       <div className="grid gap-4 sm:grid-cols-2">
-        <section className="rounded-2xl bg-slate-900 p-6 text-white dark:bg-slate-800">
-          <div className="text-sm uppercase tracking-wide text-slate-400">Your appointment</div>
+        <section className="rounded-2xl bg-ink-900 p-6 text-white dark:bg-ink-800">
+          <div className="text-sm uppercase tracking-wide text-ink-300">Your appointment</div>
           {appt ? (
             <>
               <div className="mt-1 text-4xl font-bold">{fmtClock(appt.slot_start)}</div>
@@ -139,8 +155,8 @@ function DriverScreen({ vehicle, onChangeVehicle }: { vehicle: VehicleOut; onCha
             </>
           ) : <div className="mt-2 text-xl text-slate-300">No booked slot. Your dispatcher books slots.</div>}
         </section>
-        <section className="rounded-2xl bg-slate-900 p-6 text-white dark:bg-slate-800">
-          <div className="text-sm uppercase tracking-wide text-slate-400">Queue at {station?.code ?? 'station'}</div>
+        <section className="rounded-2xl bg-ink-900 p-6 text-white dark:bg-ink-800">
+          <div className="text-sm uppercase tracking-wide text-ink-300">Queue at {station?.code ?? 'station'}</div>
           {station ? (
             <>
               <div className="mt-1 text-4xl font-bold">{station.queue_len} trucks</div>

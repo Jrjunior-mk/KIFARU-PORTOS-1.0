@@ -1,6 +1,7 @@
 """FastAPI dependencies: DB session, current user, role guards, audit helper, simple rate limiting."""
 from __future__ import annotations
 
+import threading
 import time
 from collections import defaultdict, deque
 from collections.abc import Callable
@@ -19,6 +20,38 @@ from .security import decode_token
 bearer = HTTPBearer(auto_error=False)
 
 DbDep = Annotated[Session, Depends(get_db)]
+
+# user_id -> (expires_at_monotonic, User). The cached object becomes detached when its request's session closes
+# (expire_on_commit=False keeps its loaded state); later requests attach a copy with merge(load=False), no SQL.
+_user_cache: dict[str, tuple[float, User]] = {}
+_user_cache_lock = threading.Lock()
+
+
+def invalidate_user_cache(user_id: str | None = None) -> None:
+    with _user_cache_lock:
+        if user_id is None:
+            _user_cache.clear()
+        else:
+            _user_cache.pop(user_id, None)
+
+
+def _load_user(db: Session, user_id: str) -> User | None:
+    ttl = get_settings().auth_cache_seconds
+    now = time.monotonic()
+    if ttl > 0:
+        with _user_cache_lock:
+            hit = _user_cache.get(user_id)
+        if hit and hit[0] > now:
+            try:
+                return db.merge(hit[1], load=False)
+            except Exception:  # pragma: no cover - fall back to a fresh load on any merge problem
+                invalidate_user_cache(user_id)
+    user = db.get(User, user_id)
+    if user is not None and ttl > 0:
+        _ = user.roles, user.pii  # make sure the relationships are loaded before the object is cached
+        with _user_cache_lock:
+            _user_cache[user_id] = (now + ttl, user)
+    return user
 
 
 class Principal:
@@ -46,7 +79,7 @@ def get_current_principal(
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token")
     if claims.get("type") != "access":
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Wrong token type")
-    user = db.get(User, claims["sub"])
+    user = _load_user(db, claims["sub"])
     if user is None or not user.is_active:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "User inactive")
     return Principal(user, claims)

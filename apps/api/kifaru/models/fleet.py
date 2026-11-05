@@ -40,9 +40,14 @@ class Vehicle(ULIDPk, Timestamped, Base):
     last_lon: Mapped[float | None] = mapped_column(Float)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     watchlist_reason: Mapped[str | None] = mapped_column(String(200))
+    # RCS v2 enrolment: trust tier (1 port, 2 approved origin scale, 3 road node/lane, 4 on-board only) and Reg 20 demerits
+    trust_tier: Mapped[int] = mapped_column(Integer, default=3)
+    demerit_points: Mapped[int] = mapped_column(Integer, default=0)
+    enrolled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     fleet: Mapped[Fleet | None] = relationship(back_populates="vehicles")
     tags: Mapped[list[RfidTag]] = relationship(back_populates="vehicle", lazy="selectin")
+    permits: Mapped[list[SpecialLoadPermit]] = relationship(back_populates="vehicle", lazy="selectin")
 
 
 class Trailer(ULIDPk, Timestamped, Base):
@@ -90,3 +95,22 @@ class DriverPII(Base):
     national_id_enc: Mapped[str | None] = mapped_column(String(255))
 
     driver: Mapped[Driver] = relationship(back_populates="pii")
+
+
+class SpecialLoadPermit(ULIDPk, Timestamped, Base):
+    """Special-load (abnormal dimension / mass) permit linked to a vehicle; checked against the dimension portal (RCS v2 §5)."""
+
+    __tablename__ = "special_load_permits"
+    __table_args__ = {"schema": "core"}
+    vehicle_id: Mapped[str] = mapped_column(CHAR(26), ForeignKey("core.vehicles.id", ondelete="CASCADE"), index=True)
+    reference: Mapped[str] = mapped_column(String(40), index=True)
+    max_length_m: Mapped[float] = mapped_column(Float)
+    max_width_m: Mapped[float] = mapped_column(Float)
+    max_height_m: Mapped[float] = mapped_column(Float)
+    max_gvm_kg: Mapped[int | None] = mapped_column(Integer)
+    valid_from: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    valid_to: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    route: Mapped[str | None] = mapped_column(String(200))
+    issued_by: Mapped[str | None] = mapped_column(String(80))  # authority reference (NTSA / KeNHA), free text until integrated
+
+    vehicle: Mapped[Vehicle] = relationship(back_populates="permits")

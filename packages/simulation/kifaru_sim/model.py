@@ -14,11 +14,23 @@ Station layout (one direction of travel):
 
 Baseline policy ``all_stop`` = the pre-platform situation: every truck queues for the static scale (no WIM
 pre-screen); the engine decision is still computed as a "shadow" so the GREEN/AMBER/RED mix is comparable.
+
+RCS v2 policy ``rcs_v2`` adds the Load Compliance Token and the rolling verification lane:
+
+    arrivals --> [WIM screening node] --GREEN (token consistent / clear with margin)--> exit
+                           |-- AMBER --> [rolling verification lane, L bays, ~10 km/h] --GREEN--> exit (lane token)
+                           |                                            |-- AMBER/RED --> [static scale] ...
+                           |-- RED   --> [static scale] --> [inspection bay] --> exit
+
+A share ``token_coverage`` of arriving trucks carries a port or origin token (weight known to ``token_error``); on the
+road they are only checked for consistency with the token. ``cargo_change_prob`` of tokened trucks changed their load
+after the token was issued, which the consistency check catches. When the lane is closed (``lane_closures``) AMBER
+trucks fall back to the static scale, as in v1.
 """
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Literal
 
 import numpy as np
@@ -28,7 +40,7 @@ from kifaru.services import clearance_engine as ce
 from kifaru.services.limits import DEFAULT_LIMITS, LimitSet
 from kifaru_wim_dsp.signal_gen import random_truck
 
-Policy = Literal["all_stop", "rolling"]
+Policy = Literal["all_stop", "rolling", "rcs_v2"]
 
 # Hour-of-day multipliers (index = hour 0..23, mean = 1.0). Shape: quiet night, morning build-up from the port
 # gate opening, mid-morning peak, afternoon plateau, evening peak as port gates release the day's trucks.
@@ -73,6 +85,16 @@ class SimConfig:
     policy: Policy = "rolling"
     priority_queue: bool = False  # priority for perishable / hazardous cargo at the static scale
     priority_share: float = 0.12
+    # RCS v2 (policy "rcs_v2"): tokens and the rolling verification lane
+    token_coverage: float = 0.9  # share of arriving trucks with a port or origin Load Compliance Token
+    token_port_share: float = 0.6  # of tokened trucks, share from the port (rest: approved origin scales)
+    token_error: float = 0.01  # relative 1-sigma error of the port / origin scale behind the token
+    cargo_change_prob: float = 0.02  # tokened trucks whose load changed after the token (caught by the consistency check)
+    lane_bays: int = 1  # rolling verification lanes
+    lane_service_median_s: float = 90.0  # a lane pass costs about 1.5 min (plan assumption)
+    lane_service_sigma: float = 0.3
+    lane_rel_uncertainty: float = 0.01  # expanded (k=2) relative uncertainty of the lane's per-wheel scales
+    lane_closures: tuple[tuple[float, float], ...] = ()  # (start_s, duration_s): lane closed, AMBER falls back to static
     # gate hold (delayed cargo release)
     release_hold_prob: float = 0.0
     release_hold_median_s: float = 900.0
@@ -118,6 +140,11 @@ class TruckRecord:
     gvm_kg: float = 0.0
     axle_config: str = ""
     rules_fired: tuple[str, ...] = ()
+    # RCS v2
+    stream: str = "untokened"  # port | origin | untokened
+    route: str = "continue"
+    lane_pass: bool = False
+    wait_lane_s: float = 0.0
 
     @property
     def time_in_system_s(self) -> float:
@@ -136,6 +163,8 @@ class SimResult:
     wim_busy_s: float
     inspection_busy_s: float
     end_s: float
+    queue_lane: np.ndarray = field(default_factory=lambda: np.zeros(0))
+    lane_busy_s: float = 0.0
 
     # ---- convenience metrics ---------------------------------------------------------------------------
     def tis_minutes(self) -> np.ndarray:
@@ -148,7 +177,13 @@ class SimResult:
         stopped = sum(1 for t in self.trucks if t.stopped)
         waits_static = np.array([t.wait_static_s for t in self.trucks if t.stopped]) if stopped else np.zeros(1)
         prio = [t for t in self.trucks if t.priority]
+        lane = [t for t in self.trucks if t.lane_pass]
         return {
+            "pct_lane": 100.0 * len(lane) / n if n else 0.0,
+            "pct_tokened": 100.0 * sum(1 for t in self.trucks if t.stream != "untokened") / n if n else 0.0,
+            "mean_wait_lane_s": float(np.mean([t.wait_lane_s for t in lane])) if lane else 0.0,
+            "max_queue_lane": int(self.queue_lane.max()) if len(self.queue_lane) else 0,
+            "lane_utilisation": self.lane_busy_s / (self.config.lane_bays * self.end_s) if self.config.lane_bays and self.end_s else 0.0,
             "trucks": n,
             "mean_tis_min": float(tis.mean()) if n else 0.0,
             "p90_tis_min": float(np.percentile(tis, 90)) if n else 0.0,
@@ -303,6 +338,8 @@ class StationModel:
         self.wim = simpy.Resource(self.env, capacity=max(1, cfg.wim_lanes))
         self.static = simpy.PriorityResource(self.env, capacity=max(1, cfg.static_bays)) if cfg.priority_queue else simpy.Resource(self.env, capacity=max(1, cfg.static_bays))
         self.inspection = simpy.Resource(self.env, capacity=max(1, cfg.inspection_bays))
+        self.lane = simpy.Resource(self.env, capacity=max(1, cfg.lane_bays))
+        self.lane_closed = False
         self.arrivals = np.asarray(arrivals) if arrivals is not None else generate_arrivals(cfg, self.rng)
         self.trucks: list[TruckRecord] = []
         self.in_system = 0
@@ -311,6 +348,8 @@ class StationModel:
         self.q_wim: list[int] = []
         self.q_static: list[int] = []
         self.q_insp: list[int] = []
+        self.q_lane: list[int] = []
+        self.lane_busy = 0.0
         self.static_busy = 0.0
         self.wim_busy = 0.0
         self.insp_busy = 0.0
@@ -341,6 +380,12 @@ class StationModel:
         for r in reqs:
             self.wim.release(r)
 
+    def _lane_closure(self, start_s: float, duration_s: float):
+        yield self.env.timeout(start_s)
+        self.lane_closed = True
+        yield self.env.timeout(duration_s)
+        self.lane_closed = False
+
     def _routed_to_failed_lane(self) -> bool:
         """A truck arriving while a lane is down is in that lane with probability lanes_down / lanes."""
         if self.lanes_down <= 0:
@@ -353,6 +398,7 @@ class StationModel:
             self.q_wim.append(len(self.wim.queue))
             self.q_static.append(len(self.static.queue))
             self.q_insp.append(len(self.inspection.queue))
+            self.q_lane.append(len(self.lane.queue))
             if self.arrivals_done and self.in_system == 0 and self.env.now >= self.cfg.horizon_s:
                 return
             yield self.env.timeout(self.cfg.monitor_interval_s)
@@ -360,15 +406,41 @@ class StationModel:
     def _decide(self, rec: TruckRecord) -> ce.ClearanceResult:
         m, ident, veh, meta = build_measurement_and_identity(self.cfg, self.rng)
         rec.gvm_kg, rec.axle_config = meta["gvm_kg"], meta["axle_config"]
-        res = ce.decide(m, ident, veh, None, limits=self.cfg.limits, identity_min_confidence=self.cfg.identity_min_confidence, audit_rate=self.cfg.audit_rate, audit_seed=int(self.rng.integers(0, 2**31 - 1)))
+        self._last_inputs = (m, ident, veh)
+        token = None
+        if self.cfg.policy == "rcs_v2" and veh is not None and self.rng.random() < self.cfg.token_coverage:
+            src = "port" if self.rng.random() < self.cfg.token_port_share else "origin"
+            rec.stream = src
+            true_gvm = meta["gvm_kg"]
+            # the token holds the weight at the first trusted point; a share of trucks changed cargo since (detected on the road)
+            at_issue = true_gvm * (1 - self.rng.uniform(0.10, 0.30)) if self.rng.random() < self.cfg.cargo_change_prob else true_gvm
+            token_gvm = at_issue * (1 + self.rng.normal(0, self.cfg.token_error))
+            token = ce.TokenInput(f"SIMT{rec.truck_id}", f"LCT-SIM{rec.truck_id:06d}", src, ce.TRUST_TIER_BY_SOURCE[src], gvm_kg=float(token_gvm))
+        lane_available = self.cfg.policy == "rcs_v2" and self.cfg.lane_bays > 0 and not self.lane_closed
+        res = ce.decide(m, ident, veh, None, limits=self.cfg.limits, identity_min_confidence=self.cfg.identity_min_confidence, audit_rate=self.cfg.audit_rate,
+                        audit_seed=int(self.rng.integers(0, 2**31 - 1)), token=token, node_kind="road_mainline", lane_available=lane_available)
         rec.decision = res.decision
+        rec.route = res.route
         rec.rules_fired = tuple(r["rule"] for r in res.rules_fired)
+        return res
+
+    def _decide_in_lane(self, rec: TruckRecord) -> ce.ClearanceResult:
+        """Rolling verification lane: the same truck measured on 1 % per-wheel scales with the dimension portal."""
+        m, ident, veh = self._last_inputs
+        axles = [ce.AxleInput(a.index, a.load_kg, self.cfg.lane_rel_uncertainty * a.load_kg, a.group_no) for a in m.axles]
+        gvm_u = float(math.sqrt(sum(a.u_kg**2 for a in axles)))
+        lane_m = ce.MeasurementInput(gvm_kg=m.gvm_kg, gvm_u_kg=gvm_u, axles=axles, detected_axle_config=m.detected_axle_config, quality_flags=[], sensor_health={}, speed_mps=2.8, source="simulated")
+        res = ce.decide(lane_m, ident, veh, None, limits=self.cfg.limits, identity_min_confidence=self.cfg.identity_min_confidence, audit_rate=0.0,
+                        audit_seed=int(self.rng.integers(0, 2**31 - 1)), node_kind="verification_lane", lane_available=False)
+        rec.decision = res.decision
+        rec.route = res.route
+        rec.rules_fired = rec.rules_fired + tuple("LANE:" + r["rule"] for r in res.rules_fired)
         return res
 
     def _truck(self, rec: TruckRecord):
         cfg, env = self.cfg, self.env
         inspect = bool(self.rng.random() < cfg.inspection_rate)
-        if cfg.policy == "rolling" and self._routed_to_failed_lane():
+        if cfg.policy in ("rolling", "rcs_v2") and self._routed_to_failed_lane():
             rec.stop_reason = "lane_down"
             self._decide(rec)
             needs_static = True
@@ -384,6 +456,35 @@ class StationModel:
             self._decide(rec)
             needs_static = rec.decision in ("AMBER", "RED") or inspect
             if needs_static:
+                rec.stop_reason = rec.decision.lower() if rec.decision != "GREEN" else "inspection_sample"
+        elif cfg.policy == "rcs_v2":
+            t0 = env.now
+            with self.wim.request() as req:
+                yield req
+                rec.wait_wim_s = env.now - t0
+                svc = _lognormal(self.rng, cfg.wim_service_median_s, cfg.wim_service_sigma)
+                self.wim_busy += svc
+                yield env.timeout(svc)
+            self._decide(rec)
+            needs_static = rec.decision == "RED" or inspect
+            if rec.route == "verification_lane" and not self.lane_closed:
+                # roll through the verification lane at ~10 km/h: not a stop, but it takes lane time
+                rec.lane_pass = True
+                t1 = env.now
+                with self.lane.request() as lreq:
+                    yield lreq
+                    rec.wait_lane_s = env.now - t1
+                    svc = _lognormal(self.rng, cfg.lane_service_median_s, cfg.lane_service_sigma)
+                    self.lane_busy += svc
+                    yield env.timeout(svc)
+                self._decide_in_lane(rec)
+                needs_static = needs_static or rec.decision in ("AMBER", "RED")
+                if needs_static:
+                    rec.stop_reason = "lane_" + rec.decision.lower() if rec.decision != "GREEN" else "inspection_sample"
+            elif rec.decision == "AMBER":
+                needs_static = True  # no lane (closed or not built): v1 behaviour
+                rec.stop_reason = "amber_no_lane"
+            elif needs_static:
                 rec.stop_reason = rec.decision.lower() if rec.decision != "GREEN" else "inspection_sample"
         else:  # all_stop baseline: no pre-screen, shadow decision only
             rec.stop_reason = "all_stop_policy"
@@ -428,6 +529,8 @@ class StationModel:
         self.env.process(self._monitor())
         for start, dur, n in self.cfg.lane_failures:
             self.env.process(self._lane_failure(start, dur, n))
+        for start, dur in self.cfg.lane_closures:
+            self.env.process(self._lane_closure(start, dur))
         self.env.run()
         return SimResult(
             config=self.cfg,
@@ -440,6 +543,8 @@ class StationModel:
             wim_busy_s=self.wim_busy,
             inspection_busy_s=self.insp_busy,
             end_s=float(self.env.now),
+            queue_lane=np.array(self.q_lane),
+            lane_busy_s=self.lane_busy,
         )
 
 

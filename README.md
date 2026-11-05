@@ -1,15 +1,21 @@
 # KIFARU PORTOS
 
 **Kenya Intelligent Freight, Access, Routing & Unified Logistics Platform** — an AI-assisted smart-port and freight
-logistics ecosystem built around highway-speed weigh-in-motion (WIM) rolling clearance for the Port of Mombasa,
-Mariakani and the Northern Corridor.
+logistics ecosystem for the Port of Mombasa, Mariakani and the Northern Corridor, built around **RCS v2, port-anchored
+clearance**: every heavy truck is weighed at its first trusted point (the port exit for port cargo, an approved
+loading-site scale for mines, quarries and factories, or the first road station for everyone else), receives a signed
+**Load Compliance Token**, and later weighbridges honour that token instead of weighing again. Doubtful trucks roll
+through a **Rolling Verification Lane** at about 10 km/h where weight, dimensions, lifted axles and per-wheel loads are
+captured without a stop; red cases still go to the static scale and an authorised officer. A clearance **registry**
+holds tokens, certificates, permits, release orders and demerit data for every station. Design, legal basis and
+modelled effect: `docs/01-requirements/rcs-v2-port-anchored-clearance.md`.
 
 | | |
 |---|---|
 | Live demo | https://kifaru-portos.vercel.app — demo hosting on Vercel (ephemeral database, polling instead of WebSockets); see `docs/06-operations/vercel-demo-hosting.md`. |
-| Status (2026-11-04) | Phases 1–5 implemented and tested locally; Phase 6 hardware designed (not built); Phase 7 pilot procedure written. **No cloud deployment has been performed** — it requires the owner's AWS account (see `docs/06-operations/deployment-guide.md`). |
-| Honesty rules | Every weighing record carries `source` = `live` / `simulated` / `replay`; simulated data is never shown as live. Government and commercial adapters are `mock` until authorised credentials are configured. Environmental figures are labelled *modelled*. Accuracy/latency targets remain targets until measured in Phase 7. |
-| Legal note | Axle/GVM limits in `apps/api/kifaru/services/limits.py` are configuration flagged for verification against the current EAC Vehicle Load Control Act schedule. The static scale remains the legal reference; WIM only pre-screens. |
+| Status (2026-11-05) | Phases 1–5 implemented and tested locally; Phase 6 hardware designed (not built); Phase 7 pilot procedure written. **RCS v2 implemented in software (tokens, registry, release orders, verification lane, chain model); field items pending** — agency access, legal opinion, scale approval, lane and port-node hardware, baseline data (RTM section L, `docs/02-architecture/roadmap.md`). **No cloud deployment has been performed** — it requires the owner's AWS account (see `docs/06-operations/deployment-guide.md`). |
+| Honesty rules | Every weighing record carries `source` = `live` / `simulated` / `replay`; simulated data is never shown as live. Government and commercial adapters are `mock` until authorised credentials are configured. Environmental figures and every RCS v2 chain-model result are labelled *modelled*. Accuracy/latency targets remain targets until measured in Phase 7. No regulator has reviewed or agreed the RCS v2 design. |
+| Legal note | Axle/GVM limits, the discretion allowance, dimension limits and the overload fee table in `apps/api/kifaru/services/limits.py` are configuration flagged for verification against the EAC Vehicle Load Control (Enforcement Measures) Regulations, 2018 (`docs/01-requirements/legal-hooks-eac-vlc-2018.md`). The static scale remains the legal reference; WIM, port and lane readings only pre-screen, and fees and release orders are issued by an authorised officer. |
 
 ## Repository layout
 
@@ -19,12 +25,14 @@ kifaru-portos/
 │   ├── api/            FastAPI backend: auth/RBAC/MFA, fleet, stations, WIM ingest + simulator, deterministic
 │   │                   clearance engine, signed tickets + QR, hash-chained ledger, cargo passport, queue/slots,
 │   │                   backhaul marketplace, environment, integrations, admin, WebSocket, workers (MQTT/SQS/jobs)
-│   ├── web/            React 18 + TypeScript + Vite + Tailwind: 7 role dashboards, public ticket verify, Three.js twin
+│   ├── web/            React 18 + TypeScript + Vite + Tailwind: 7 role dashboards, clearance registry, RCS v2 model
+│   │                   explorer, public ticket/token verify and About page, Three.js twin
 │   └── mobile/         Flutter driver (hands-free) + cargo-owner app (not compiled here: no Flutter SDK)
 ├── packages/
 │   ├── wim_dsp/        Reference WIM signal generation + processing (axle detection, speed, loads, uncertainty, health)
 │   ├── ai_agents/      10 cooperating advisory agents + orchestrator (forecast, backhaul, release, environment, …)
-│   └── simulation/     SimPy weighbridge/port model, 11 scenarios, comparison reports, SUMO adapter
+│   └── simulation/     SimPy station model (16 scenarios incl. RCS v2 tokens + verification lane), RCS v2 Monte Carlo
+│                       chain model + experiments/gate, comparison reports, SUMO adapter
 ├── edge/gateway/       Roadside gateway (Python): DAQ client, identity adapters, local clearance mirror,
 │                       SQLite store-and-forward outbox, MQTT/HTTP uplink, VMS driver
 ├── firmware/
@@ -35,15 +43,18 @@ kifaru-portos/
 │   └── docker/         docker-compose (PostgreSQL, Redis, EMQX, api, web, workers)
 ├── .github/workflows/  CI (lint, tests, web build, terraform validate, security scans) and OIDC deploy pipeline
 └── docs/
-    ├── 01-requirements/  source review (original RCS document missing — see 00-source-review.md), RTM
-    ├── 02-architecture/  system, cloud, database ERD, hardware, tech stack, roadmap
+    ├── 01-requirements/  RCS v2 plan (rcs-v2-port-anchored-clearance.md), legal hooks (legal-hooks-eac-vlc-2018.md),
+    │                     source review (original v1 document missing — see 00-source-review.md), RTM (section L = RCS v2)
+    ├── 02-architecture/  system, cloud, database ERD, hardware, tech stack, roadmap (incl. RCS v2 phases),
+    │                     RCS v2 API contract (rcs-v2-api-contract.md)
     ├── 03-hardware/      sensor architecture, analog front-end calculations, power/protection, enclosure,
-    │                     communications, calibration, lab rig build guide, BOM
+    │                     communications, calibration, lab rig build guide, BOM, rolling verification lane,
+    │                     port gate-out weigh node
     ├── 04-security/      threat model, controls catalogue, DPIA (Kenya DPA 2019), incident response plan
-    ├── 05-report/        42-section engineering report
+    ├── 05-report/        engineering report (42 sections + RCS v2 addendum, section 43)
     └── 06-operations/    deployment guide, DR runbook, backups, local development, API documentation
-                          (+ openapi.json), simulation guide, emissions model, maintenance, user manuals,
-                          USSD/SMS spec, pilot shadow-mode plan, verified test results
+                          (+ openapi.json), simulation guide, RCS v2 simulation plan, emissions model, maintenance,
+                          user manuals, USSD/SMS spec, pilot shadow-mode plan (incl. v2 additions), verified test results
 ```
 
 ## Quick start (local, no Docker)
@@ -74,6 +85,7 @@ cd edge/gateway && ../../.venv/Scripts/python -m kifaru_gateway.main --simulate 
 ```
 
 Docker Compose path (PostgreSQL + Redis + EMQX + api + web): `docs/06-operations/local-development.md`.
+Hosted PostgreSQL on Supabase (project KIFARU-PORTOS): `apps/api/scripts/connect_supabase.py --url "<uri>"`, see `docs/06-operations/supabase-postgres.md`.
 
 ## Tests
 
@@ -90,6 +102,20 @@ python -m ruff check apps/api packages                                # lint (co
 Run the API suite against PostgreSQL: `KIFARU_TEST_DATABASE_URL=postgresql+psycopg://user:pass@host/db pytest -q`.
 Verified results and their caveats: `docs/06-operations/test-results.md`.
 
+## RCS v2 chain model (modelled, not measured)
+
+```bash
+kifaru-sim v2 --set avg_loading_pct=85 --set token_coverage=0.9        # one run: road stops, port re-weigh, lane and static shares
+kifaru-sim v2-sweep --factor avg_loading_pct --values 75,80,85,90      # port-truck table (plan §9)
+kifaru-sim v2-sweep --factor token_coverage --values 0.3,0.5,0.7,0.9   # mixed-traffic table (plan §9)
+kifaru-sim v2-gate                                                      # go/no-go gate evaluation
+kifaru-sim run --scenarios rcs_v2_tokens_90,rcs_v2_lane_closure        # SimPy station model with tokens and a verification lane
+```
+
+The same model backs `POST /api/v1/rcs/model` and the web page `/model`. Plan and assumptions:
+`docs/06-operations/rcs-v2-simulation-plan.md`. Every figure is an estimate under stated assumptions until the Phase 2
+baseline study replaces them with measured data.
+
 ## Demo accounts (local only)
 
 The seed command creates one account per role and prints the e-mail addresses together with a password that is
@@ -103,6 +129,9 @@ repository. Production seeding never creates demo users.
 3. Decisions on data-protection registration with the ODPC and counsel review of `docs/04-security/dpia.md`.
 4. Confirmation of the legal axle-load schedule and tolerance policy with KeNHA (`services/limits.py`).
 5. Weighbridge site access and regulator agreement for the shadow-mode pilot (`docs/06-operations/pilot-shadow-mode.md`).
+6. For RCS v2: approaches to KPA, KRA, KeNHA, NTSA and the weights-and-measures body; the data requests and legal
+   opinion of v2 Phase 0–1; a volunteer loading site with an approved scale; the discretion-allowance policy value
+   (`docs/01-requirements/rcs-v2-port-anchored-clearance.md` §11, `docs/02-architecture/roadmap.md`).
 
 ## Licence
 

@@ -3,7 +3,7 @@ import { queue as queueApi, shipments as shipmentsApi, stations as stationsApi }
 import type { PassportOut, ShipmentStage } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { PassportView, StageTimeline } from '../components/passport';
-import { Badge, Card, Empty, ErrorBanner, Notice, Spinner, Stat, StatusDot, Table } from '../components/ui';
+import { Badge, Card, Empty, ErrorBanner, Notice, PageHeader, Spinner, Stat, StatusDot, Table } from '../components/ui';
 import { useLiveEvents } from '../hooks/useLiveEvents';
 import { useMutation, useQuery } from '../hooks/useQuery';
 import { fmtDateTime, fmtKg, titleCase } from '../lib/format';
@@ -29,10 +29,7 @@ export default function Warehouse() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-end justify-between gap-2">
-        <div><h1 className="text-xl font-semibold">Warehouse — {me?.org_name}</h1><p className="text-sm text-slate-500">live {live.status}</p></div>
-        {mine.length > 1 && <select className="input w-auto" aria-label="Warehouse" value={whId} onChange={(e) => { setWhId(e.target.value); setSelected(null); }}>{mine.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select>}
-      </div>
+      <PageHeader eyebrow="Operations" title={<>Warehouse — {me?.org_name}</>} subtitle={<>live {live.status}</>} actions={mine.length > 1 && <select className="input w-auto" aria-label="Warehouse" value={whId} onChange={(e) => { setWhId(e.target.value); setSelected(null); }}>{mine.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select>} />
       <ErrorBanner error={whQ.error} />
       {whQ.loading && <Spinner />}
       {!whQ.loading && mine.length === 0 && <Empty>No warehouses are registered for your organisation.</Empty>}

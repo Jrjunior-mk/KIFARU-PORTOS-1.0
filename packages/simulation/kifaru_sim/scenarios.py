@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from kifaru.services.limits import LimitSet
+
 from .model import SimConfig
 
 BASE = SimConfig(policy="rolling", label="base")
@@ -28,6 +30,14 @@ def _lane_failure(base: SimConfig) -> SimConfig:
     return base.with_overrides(lane_failures=((start, 7200.0, 1),))
 
 
+def _lane_closure(base: SimConfig) -> SimConfig:
+    # the rolling verification lane closed for 2 h in the middle of the run: AMBER trucks fall back to the static scale
+    start = max(0.0, base.horizon_s / 2 - 3600.0)
+    return base.with_overrides(policy="rcs_v2", token_coverage=0.9, lane_closures=((start, 7200.0),))
+
+
+ALLOWANCE_LIMITS = LimitSet(version=BASE.limits.version + "+allowance5", discretion_allowance_pct=5.0)
+
 SCENARIOS: dict[str, ScenarioFn] = {
     "baseline_all_stop": _scn(policy="all_stop"),
     "rolling_clearance": _scn(policy="rolling"),
@@ -40,6 +50,12 @@ SCENARIOS: dict[str, ScenarioFn] = {
     "delayed_cargo_release": _scn(policy="rolling", release_hold_prob=0.15, release_hold_median_s=900.0),
     "dynamic_slot_allocation": _scn(policy="rolling", slot_cap_per_15min=int(round(BASE.arrivals_per_hour * 1.1 / 4))),
     "queue_policy_priority": _scn(policy="rolling", priority_queue=True),
+    # RCS v2: Load Compliance Tokens + rolling verification lane
+    "rcs_v2_tokens_50": _scn(policy="rcs_v2", token_coverage=0.5),
+    "rcs_v2_tokens_90": _scn(policy="rcs_v2", token_coverage=0.9),
+    "rcs_v2_untokened": _scn(policy="rcs_v2", token_coverage=0.0),
+    "rcs_v2_allowance_5pct": _scn(policy="rcs_v2", token_coverage=0.9, limits=ALLOWANCE_LIMITS),
+    "rcs_v2_lane_closure": _lane_closure,
 }
 
 DESCRIPTIONS: dict[str, str] = {
@@ -54,6 +70,11 @@ DESCRIPTIONS: dict[str, str] = {
     "delayed_cargo_release": "15 % of trucks held at the gate (median 15 min) awaiting cargo release.",
     "dynamic_slot_allocation": "Arrivals smoothed by a booking cap of ~110 % of mean demand per 15-min window.",
     "queue_policy_priority": "Perishable / hazardous cargo (12 %) gets priority at the static scale.",
+    "rcs_v2_tokens_50": "RCS v2: 50 % of trucks carry a port/origin token; AMBER rolls through the verification lane (1 lane, ~1.5 min) instead of stopping.",
+    "rcs_v2_tokens_90": "RCS v2: 90 % token coverage, verification lane for the rest.",
+    "rcs_v2_untokened": "RCS v2 lane only: no tokens (first-time traffic), every AMBER rolls through the verification lane.",
+    "rcs_v2_allowance_5pct": "RCS v2 at 90 % coverage with the 5 % Second Schedule discretion allowance applied (policy decision for KeNHA).",
+    "rcs_v2_lane_closure": "RCS v2 at 90 % coverage with the verification lane closed for 2 h mid-run (AMBER falls back to the static scale).",
 }
 
 
@@ -74,4 +95,6 @@ def build(name: str, base: SimConfig = BASE, hours: float | None = None, seed: i
     cfg = cfg.with_overrides(**kw)
     if name == "station_lane_failure" and hours is not None:
         cfg = _lane_failure(cfg).with_overrides(label=name)
+    if name == "rcs_v2_lane_closure" and hours is not None:
+        cfg = _lane_closure(cfg).with_overrides(label=name)
     return cfg

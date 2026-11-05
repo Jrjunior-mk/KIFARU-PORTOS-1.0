@@ -20,7 +20,26 @@ SENSOR_KINDS = [
     "pavement_temp",
     "ambient_temp_rh",
     "wheel_detector",
+    # RCS v2: verification lane and port gate-out node sensors
+    "lidar_portal",
+    "light_curtain",
+    "side_lidar",
+    "wheel_load_cell",
+    "container_ocr",
+    "eseal_reader",
 ]
+
+STATION_KINDS = ["road_station", "port_gate", "origin_site"]
+LANE_TYPES = ["wim_highspeed", "wim_lowspeed", "static", "port_gateout", "origin_scale", "rolling_verification"]
+# lane type -> node kind used by the clearance engine / weighing record
+NODE_KIND_BY_LANE_TYPE = {
+    "wim_highspeed": "road_mainline",
+    "wim_lowspeed": "road_mainline",
+    "static": "static",
+    "port_gateout": "port_gateout",
+    "origin_scale": "origin",
+    "rolling_verification": "verification_lane",
+}
 
 
 class WeighingStation(ULIDPk, Timestamped, Base):
@@ -33,6 +52,7 @@ class WeighingStation(ULIDPk, Timestamped, Base):
     capacity_per_hour: Mapped[int] = mapped_column(Integer, default=120)
     static_capacity_per_hour: Mapped[int] = mapped_column(Integer, default=40)
     alt_allowed: Mapped[bool] = mapped_column(Boolean, default=False)
+    kind: Mapped[str] = mapped_column(String(16), default="road_station")  # road_station | port_gate | origin_site
     status: Mapped[str] = mapped_column(String(16), default="operational")  # operational, degraded, offline
     timezone: Mapped[str] = mapped_column(String(40), default="Africa/Nairobi")
 
@@ -44,8 +64,11 @@ class Lane(ULIDPk, Timestamped, Base):
     __table_args__ = {"schema": "core"}
     station_id: Mapped[str] = mapped_column(CHAR(26), ForeignKey("core.weighing_stations.id"), index=True)
     lane_no: Mapped[int] = mapped_column(Integer)
-    type: Mapped[str] = mapped_column(String(16), default="wim_highspeed")  # wim_highspeed, wim_lowspeed, static
+    type: Mapped[str] = mapped_column(String(24), default="wim_highspeed")  # see LANE_TYPES
     direction: Mapped[str] = mapped_column(String(16), default="inbound")
+    # Reg 5: true only when the lane's scale holds weights-and-measures approval; until then a lane reading never replaces
+    # the static scale as proof of overload.
+    legal_grade: Mapped[bool] = mapped_column(Boolean, default=False)
     status: Mapped[str] = mapped_column(String(16), default="operational")
     device_id: Mapped[str | None] = mapped_column(String(64), unique=True)  # IoT thing name / edge gateway id
     calibration_valid_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -67,7 +90,7 @@ class Sensor(ULIDPk, Timestamped, Base):
     last_reading_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     lane: Mapped[Lane] = relationship(back_populates="sensors")
-    calibrations: Mapped[list[CalibrationRecord]] = relationship(back_populates="sensor")
+    calibrations: Mapped[list[CalibrationRecord]] = relationship(back_populates="sensor", lazy="selectin", order_by="CalibrationRecord.valid_to")
 
 
 class CalibrationRecord(ULIDPk, Timestamped, Base):

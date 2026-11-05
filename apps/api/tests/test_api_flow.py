@@ -65,9 +65,15 @@ def test_mfa_setup_and_privileged_override_requires_mfa(client, operator):
 def test_stations_seeded_with_lanes_and_sensors(client, operator):
     sts = client.get(f"{API}/stations", headers=h(operator)).json()
     codes = {s["code"] for s in sts}
-    assert {"MRK", "ATH", "MBS-GATE18", "GLG"} <= codes
+    assert {"MRK", "ATH", "MBS-GATE18", "GLG", "BMB-QRY"} <= codes
     mrk = next(s for s in sts if s["code"] == "MRK")
-    assert len(mrk["lanes"]) == 3 and len(mrk["lanes"][0]["sensors"]) == 13
+    # RCS v2: two high-speed WIM lanes, one rolling verification lane (lane 5) and the static scale (lane 9)
+    assert len(mrk["lanes"]) == 4 and len(mrk["lanes"][0]["sensors"]) == 13
+    assert {ln["type"] for ln in mrk["lanes"]} == {"wim_highspeed", "rolling_verification", "static"}
+    port = next(s for s in sts if s["code"] == "MBS-GATE18")
+    assert port["kind"] == "port_gate" and any(ln["type"] == "port_gateout" for ln in port["lanes"])
+    origin = next(s for s in sts if s["code"] == "BMB-QRY")
+    assert origin["kind"] == "origin_site" and origin["lanes"][0]["legal_grade"] is True
 
 
 def _lane(client, auth, code="MRK"):

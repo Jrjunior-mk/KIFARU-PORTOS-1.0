@@ -72,3 +72,39 @@ All of the following, demonstrated in the shadow report and accepted by the regu
 Because no measured baseline exists yet, the first two weeks of shadow mode double as baseline measurement: arrival
 counts per 15 minutes, static-scale service times, queue length (manual or loop counts), and stop durations. These feed
 `packages/simulation` and replace the synthetic arrival profiles.
+
+## 7. RCS v2 shadow pilot additions (v2 Phase 4, months 10–16)
+
+Source: `docs/01-requirements/rcs-v2-port-anchored-clearance.md` §8. The v2 shadow pilot adds three nodes to the
+station shadow mode above. As before, nothing is enforced: tokens are issued and compared, but nobody acts on them,
+and every truck follows today's procedure.
+
+| Node | Site | What runs in shadow | What is compared |
+|---|---|---|---|
+| Port gate-out weigh node | One KPA exit lane beside the i-Gate (subject to KPA permission) | Low-speed weighing, plate/RFID/container OCR/e-seal reads, expected-weight comparison, token issue (`source=port`) | Port reading vs port re-weigh static scale; measured vs expected weight (declaration) |
+| Origin weigh node | One approved loading-site scale (quarry, mine or factory volunteer) | Signed origin tickets, token issue (`source=origin`) | Origin ticket vs first-station road and lane readings (drift detection) |
+| Rolling Verification Lane | Mariakani | Lane passes for the trucks that would be diverted (AMBER on the mainline, audits), dimensions, lifted axle, per-wheel loads, lane token issue | Lane reading vs static scale (paired); dimensions vs static-bridge measurement |
+| Road screening node | Mariakani mainline (existing WIM feed or added readers) | Token lookup and consistency check for tokened trucks | Road reading vs token weight; consistency rate by token source |
+
+Data capture: every pass is a `WeighingEvent` with `node_kind`, `stream` and `route`, tagged `source=live`; tokens
+and release orders are written to the registry but are not shown to drivers or officers as instructions.
+
+### Exit criteria for enforcing v2 (in addition to §4)
+
+- Port node and lane GVM 95 % error interval within the band the regulator accepts (target 1 %) on unflagged passes,
+  with at least 5,000 paired static readings per node.
+- False-clear rate ≤ 1 % among would-be GREEN decisions at the port node, the lane and tokened road passes.
+- Token consistency rate reported by source: share of tokened road passes within tolerance (8 % port/origin/lane,
+  11 % road), and the share of inconsistencies explained by legitimate weight change (partial offload, fuel).
+- Origin drift detection demonstrated: at least one injected under-reporting case at the origin scale raised the
+  origin's audit rate and suspended its tokens.
+- Dimension and lifted-axle detection agreement with static-bridge measurements reported.
+- Port re-weigh volume measured and judged practical by KPA.
+- Legal opinion delivered on Reg 10(2) for digital tokens and on officer e-signing; approved signs (Reg 9) in place
+  before any live green lane.
+
+### Baseline additions
+
+The first weeks of the v2 shadow pilot also collect the data the chain model needs (simulation plan §3): stream mix
+by classification count, port exit validation time, duplicate-check times, lane pass time, and the loading
+distribution near the limit. These replace the modelled assumptions in `kifaru_sim.rcs_v2`.

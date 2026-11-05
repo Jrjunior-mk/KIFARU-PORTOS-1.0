@@ -3,7 +3,7 @@ import { backhaul as backhaulApi, fleet as fleetApi, notifications as notifApi, 
 import { CARGO_TYPES, type CargoType, type ContainerIn, type OfferIn, type OfferOut, type PassportOut, type ShipmentIn } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { PassportView, StageTimeline } from '../components/passport';
-import { Badge, Card, Empty, ErrorBanner, Field, Notice, Spinner, Tabs } from '../components/ui';
+import { Badge, Card, Empty, ErrorBanner, Field, Notice, PageHeader, Spinner, Tabs } from '../components/ui';
 import { useLiveEvents } from '../hooks/useLiveEvents';
 import { useMutation, useQuery } from '../hooks/useQuery';
 import { fmtAgo, fmtDateTime, fmtKes, fmtKg, isoToLocalInput, localToIso, titleCase } from '../lib/format';
@@ -29,10 +29,7 @@ export default function Owner() {
 
   return (
     <div className="mx-auto max-w-3xl space-y-3">
-      <div>
-        <h1 className="text-lg font-semibold">{me?.org_name ?? 'Cargo owner'}</h1>
-        <p className="text-xs text-slate-500">{list.length} shipments · {unread} unread alerts · live {live.status}</p>
-      </div>
+      <PageHeader eyebrow="Cargo owner" title={me?.org_name ?? 'Cargo owner'} subtitle={<>{list.length} shipments · {unread} unread alerts · live {live.status}</>} />
       <Tabs value={tab} onChange={(t) => { setTab(t); setSelected(null); }} tabs={[{ id: 'shipments', label: 'Shipments' }, { id: 'new', label: 'Register' }, { id: 'alerts', label: `Alerts${unread ? ` (${unread})` : ''}` }, { id: 'backhaul', label: 'Backhaul' }]} />
 
       {tab === 'shipments' && (

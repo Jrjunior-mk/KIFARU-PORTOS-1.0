@@ -1,10 +1,12 @@
 import { type FormEvent, lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import type { ApiError } from '../api/client';
-import { backhaul as backhaulApi, environment as envApi, fleet as fleetApi, queue as queueApi, shipments as shipmentsApi, stations as stationsApi, weighing as weighingApi } from '../api/endpoints';
-import { BODY_TYPES, type AppointmentOut, type BodyType, type FleetOut, type MatchOut, type OfferOut, type PassportOut, type SlotOut, type StationOut, type VehicleIn, type VehicleOut, type WeighingOut } from '../api/types';
+import { backhaul as backhaulApi, environment as envApi, fleet as fleetApi, queue as queueApi, rcs as rcsApi, shipments as shipmentsApi, stations as stationsApi, weighing as weighingApi } from '../api/endpoints';
+import { BODY_TYPES, type AppointmentOut, type BodyType, type FleetOut, type MatchOut, type OfferOut, type PassportOut, type SlotOut, type StationOut, type TokenOut, type VehicleIn, type VehicleOut, type WeighingOut } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
-import { Badge, Card, Empty, ErrorBanner, Field, Notice, Spinner, Stat, Table, Tabs } from '../components/ui';
+import { TierBadge, TokenRefLink, TokenStatusBadge } from '../components/rcs';
+import { Badge, Card, Empty, ErrorBanner, Field, Notice, PageHeader, Spinner, Stat, Table, Tabs } from '../components/ui';
+import { PermitForm, PermitTable } from './Registry';
 import { DecisionPanel, TicketCard, WeighingHistoryTable } from '../components/weighing';
 import { useLiveEvents } from '../hooks/useLiveEvents';
 import { useMutation, useQuery } from '../hooks/useQuery';
@@ -24,36 +26,42 @@ export default function Transporter() {
   const eventsQ = useQuery(() => weighingApi.events({ limit: 200 }), [], { pollMs: 60_000 });
   const apptsQ = useQuery(() => queueApi.mine(), [], { pollMs: 60_000 });
   const oppsQ = useQuery(() => backhaulApi.opportunities(), [], { pollMs: 60_000 });
+  const tokensQ = useQuery(() => rcsApi.tokens({ status: 'active', limit: 500 }), [], { pollMs: 60_000 });
+  const permitsQ = useQuery(() => rcsApi.permits(), []);
   const live = useLiveEvents(['clearance.decided', 'queue.updated', 'backhaul.opportunity', 'cargo.status_changed', 'shipment.delivered'], null, 100, (ev) => {
-    if (ev.type === 'clearance.decided') void eventsQ.refetch();
+    if (ev.type === 'clearance.decided') { void eventsQ.refetch(); void tokensQ.refetch(); }
     if (ev.type === 'queue.updated') void apptsQ.refetch();
     if (ev.type === 'backhaul.opportunity') void oppsQ.refetch();
     if (ev.type === 'cargo.status_changed' || ev.type === 'shipment.delivered') void shipmentsQ.refetch();
   });
-  const [tab, setTab] = useState<'fleet' | 'shipments' | 'clearance' | 'slots' | 'backhaul' | 'analytics'>('fleet');
+  const [tab, setTab] = useState<'fleet' | 'shipments' | 'clearance' | 'slots' | 'backhaul' | 'permits' | 'analytics'>('fleet');
   const vehicles = vehiclesQ.data ?? [];
+  const tokenByVehicle = useMemo(() => { const m = new Map<string, TokenOut>(); for (const t of tokensQ.data ?? []) if (t.vehicle_id && !m.has(t.vehicle_id)) m.set(t.vehicle_id, t); return m; }, [tokensQ.data]);
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div><h1 className="text-xl font-semibold">Transporter — {me?.org_name ?? 'fleet'}</h1><p className="text-sm text-slate-500">{vehicles.length} vehicles · {shipmentsQ.data?.length ?? 0} shipments · live {live.status}</p></div>
-        <Badge tone={live.hasLive ? 'teal' : 'slate'}>{live.hasLive ? 'live measurements seen' : 'simulated data only'}</Badge>
-      </div>
-      <Tabs value={tab} onChange={setTab} tabs={[{ id: 'fleet', label: 'Fleet & map' }, { id: 'shipments', label: 'Shipments' }, { id: 'clearance', label: 'Tickets & clearance' }, { id: 'slots', label: 'Slot booking' }, { id: 'backhaul', label: 'Backhaul' }, { id: 'analytics', label: 'Fuel & cost' }]} />
+      <PageHeader eyebrow="Operations" title={<>Transporter — {me?.org_name ?? 'fleet'}</>} subtitle={<>{vehicles.length} vehicles · {shipmentsQ.data?.length ?? 0} shipments · {tokenByVehicle.size} active tokens · live {live.status}</>} actions={<Badge tone={live.hasLive ? 'teal' : 'slate'}>{live.hasLive ? 'live measurements seen' : 'simulated data only'}</Badge>} />
+      <Tabs value={tab} onChange={setTab} tabs={[{ id: 'fleet', label: 'Fleet & map' }, { id: 'shipments', label: 'Shipments' }, { id: 'clearance', label: 'Tickets & clearance' }, { id: 'slots', label: 'Slot booking' }, { id: 'backhaul', label: 'Backhaul' }, { id: 'permits', label: 'Permits' }, { id: 'analytics', label: 'Fuel & cost' }]} />
 
       {tab === 'fleet' && (
         <div className="grid gap-4 lg:grid-cols-3">
           <Card title="Fleet" subtitle="GET /fleet/vehicles (scoped to your organisation)" className="lg:col-span-2">
             <ErrorBanner error={vehiclesQ.error} />
             {vehicles.length === 0 && !vehiclesQ.loading ? <Empty>No vehicles registered yet</Empty> : (
-              <Table head={['Plate', 'Config', 'Body', 'Tare', 'Max GVM', 'Payload', 'RFID', 'Last seen', 'Status']} dense>
-                {vehicles.map((v) => (
-                  <tr key={v.id} className="tr">
-                    <td className="td font-medium">{v.plate} {v.watchlisted && <Badge tone="red">watch-list</Badge>}</td><td className="td">{v.axle_config} <span className="text-slate-400">{v.class_code}</span></td><td className="td">{v.body_type}</td>
-                    <td className="td tabular-nums">{fmtKg(v.tare_kg)}</td><td className="td tabular-nums">{fmtKg(v.max_gvm_kg)}</td><td className="td tabular-nums">{fmtKg(v.payload_capacity_kg)}</td>
-                    <td className="td mono">{v.rfid_epcs.length ? v.rfid_epcs.join(', ') : '—'}</td><td className="td">{v.last_seen_at ? fmtAgo(v.last_seen_at) : 'never'}</td><td className="td"><Badge tone={v.status === 'active' ? 'green' : 'slate'}>{v.status}</Badge></td>
-                  </tr>
-                ))}
+              <Table head={['Plate', 'Config', 'Body', 'Tare', 'Max GVM', 'Payload', 'RFID', 'Trust tier', 'Active token', 'Last seen', 'Status']} dense>
+                {vehicles.map((v) => {
+                  const tk = tokenByVehicle.get(v.id);
+                  return (
+                    <tr key={v.id} className="tr">
+                      <td className="td font-medium">{v.plate} {v.watchlisted && <Badge tone="red">watch-list</Badge>}</td><td className="td">{v.axle_config} <span className="text-ink-400">{v.class_code}</span></td><td className="td">{v.body_type}</td>
+                      <td className="td tabular-nums">{fmtKg(v.tare_kg)}</td><td className="td tabular-nums">{fmtKg(v.max_gvm_kg)}</td><td className="td tabular-nums">{fmtKg(v.payload_capacity_kg)}</td>
+                      <td className="td mono">{v.rfid_epcs.length ? v.rfid_epcs.join(', ') : '—'}</td>
+                      <td className="td"><TierBadge tier={v.trust_tier ?? tk?.trust_tier ?? null} />{(v.demerit_points ?? 0) > 0 && <span className="ml-1 text-xs text-rose-700">{v.demerit_points} pts</span>}</td>
+                      <td className="td">{tk ? <span className="flex flex-wrap items-center gap-1"><TokenRefLink tokenRef={tk.token_ref} /><TokenStatusBadge status={tk.status} /><span className="text-xs text-ink-500">{tk.issuing_station_code} · exp {fmtDateTime(tk.expires_at)}</span></span> : <span className="text-xs text-ink-400">none</span>}</td>
+                      <td className="td">{v.last_seen_at ? fmtAgo(v.last_seen_at) : 'never'}</td><td className="td"><Badge tone={v.status === 'active' ? 'green' : 'slate'}>{v.status}</Badge></td>
+                    </tr>
+                  );
+                })}
               </Table>
             )}
             <div className="mt-4"><Suspense fallback={<Spinner label="Loading map" />}><StationMap stations={stationsQ.data ?? []} vehicles={vehicles} height={320} /></Suspense></div>
@@ -74,6 +82,15 @@ export default function Transporter() {
       {tab === 'clearance' && <ClearanceTab events={eventsQ.data ?? []} loading={eventsQ.loading} error={eventsQ.error} />}
       {tab === 'slots' && <SlotBooking stations={stationsQ.data ?? []} vehicles={vehicles} shipments={shipmentsQ.data ?? []} appts={apptsQ.data ?? []} onChanged={() => void apptsQ.refetch()} />}
       {tab === 'backhaul' && <BackhaulTab offers={oppsQ.data ?? []} loading={oppsQ.loading} error={oppsQ.error} orgId={me?.org_id ?? null} onChanged={() => void oppsQ.refetch()} />}
+      {tab === 'permits' && (
+        <div className="grid gap-4 lg:grid-cols-3">
+          <Card title="Special-load permits" subtitle="GET /rcs/permits · checked by the dimension portal against the plate; an oversize load without a valid permit is RED" className="lg:col-span-2">
+            <ErrorBanner error={permitsQ.error} />
+            {permitsQ.loading ? <Spinner /> : (permitsQ.data ?? []).length === 0 ? <Empty>No permits registered for your fleet</Empty> : <PermitTable rows={permitsQ.data ?? []} />}
+          </Card>
+          <PermitForm vehicles={vehicles} onCreated={() => void permitsQ.refetch()} />
+        </div>
+      )}
       {tab === 'analytics' && <Analytics offers={oppsQ.data ?? []} events={eventsQ.data ?? []} stations={stationsQ.data ?? []} orgId={me?.org_id ?? null} />}
     </div>
   );

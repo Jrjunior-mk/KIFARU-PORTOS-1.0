@@ -30,6 +30,7 @@ from .models import (
     Role,
     Sensor,
     Shipment,
+    SpecialLoadPermit,
     User,
     UserPII,
     Vehicle,
@@ -39,8 +40,9 @@ from .models import (
 )
 from .pii import encrypt
 from .routers.integrations import ensure_registry
-from .routers.stations import DEFAULT_LANE_SENSORS
+from .routers.stations import DEFAULT_LANE_SENSORS, SENSORS_BY_LANE_TYPE
 from .security import hash_password
+from .services.identity import normalise_plate
 
 
 def stable_id(*parts: str) -> str:
@@ -53,7 +55,6 @@ def stable_id(*parts: str) -> str:
     # keep the timestamp component (first 48 bits) at a fixed epoch so seeded ids sort before runtime ids
     fixed = (1_700_000_000_000).to_bytes(6, "big") + digest[6:]
     return str(ULID(fixed))
-from .services.identity import normalise_plate
 
 # Demo accounts are NOT part of the source tree. They come from (first match wins):
 #   1. the file named by KIFARU_SEED_ACCOUNTS,
@@ -83,12 +84,19 @@ DEMO_PASSWORD = os.environ.get("KIFARU_SEED_PASSWORD") or _ACCOUNTS.get("passwor
 _PASSWORD_GENERATED = not (os.environ.get("KIFARU_SEED_PASSWORD") or _ACCOUNTS.get("password"))
 
 STATIONS = [
-    # code, name, lat, lon, cap/h, static cap/h, alt_allowed
-    ("MRK", "Mariakani Weighbridge", -3.8617, 39.4722, 160, 50, False),
-    ("ATH", "Athi River Weighbridge", -1.4522, 36.9780, 140, 45, True),
-    ("MBS-GATE18", "Port of Mombasa Gate 18 (pre-gate WIM)", -4.0529, 39.6519, 200, 0, False),
-    ("GLG", "Gilgil Weighbridge", -0.4928, 36.3228, 120, 40, True),
+    # code, name, lat, lon, cap/h, static cap/h, alt_allowed, kind
+    ("MRK", "Mariakani Weighbridge", -3.8617, 39.4722, 160, 50, False, "road_station"),
+    ("ATH", "Athi River Weighbridge", -1.4522, 36.9780, 140, 45, True, "road_station"),
+    ("MBS-GATE18", "Port of Mombasa Gate 18 (gate-out weigh node)", -4.0529, 39.6519, 200, 20, False, "port_gate"),
+    ("GLG", "Gilgil Weighbridge", -0.4928, 36.3228, 120, 40, True, "road_station"),
+    ("BMB-QRY", "Bamburi Cement quarry scale (origin weigh node)", -3.9870, 39.7210, 60, 0, False, "origin_site"),
 ]
+# RCS v2 lane layout per station kind: (lane_no, type, direction, legal_grade)
+LANES_BY_KIND = {
+    "road_station": [(1, "wim_highspeed", "inbound", False), (2, "wim_highspeed", "outbound", False), (5, "rolling_verification", "inbound", False)],
+    "port_gate": [(1, "port_gateout", "outbound", False), (2, "port_gateout", "outbound", False)],
+    "origin_site": [(1, "origin_scale", "outbound", True)],
+}
 
 ORGS = {
     "platform": ("KIFARU PORTOS Platform", "platform"),
@@ -100,15 +108,19 @@ ORGS = {
 }
 
 VEHICLES = [
-    # plate, org, axle_config, tare, max_gvm, payload, body, epc, lat, lon
-    ("KDA 412B", "simba", "1+1+2", 14500, 42000, 27000, "container", "E2000017221101441890A001", -3.95, 39.55),
-    ("KDB 118C", "simba", "1+2+3", 16500, 50000, 33000, "flatbed", "E2000017221101441890A002", -4.03, 39.66),
-    ("KDC 905D", "simba", "1+3+3", 17500, 56000, 38000, "container", "E2000017221101441890A003", -1.30, 36.85),
-    ("KCY 377F", "simba", "1+2", 9500, 26000, 16000, "tipper", "E2000017221101441890A004", -3.86, 39.48),
-    ("KDE 230G", "pwani", "1+1+2", 14000, 42000, 27500, "flatbed", "E2000017221101441890B001", -3.80, 39.45),
-    ("KDF 661H", "pwani", "1+2+3", 16000, 50000, 34000, "tanker", "E2000017221101441890B002", -4.05, 39.67),
-    ("KCZ 844J", "pwani", "1+1", 7000, 18000, 11000, "box", None, -1.29, 36.82),
-    ("KDG 102K", "pwani", "1+2+3", 16200, 50000, 33800, "reefer", "E2000017221101441890B004", -0.30, 36.07),
+    # plate, org, axle_config, tare, max_gvm, payload, body, epc, lat, lon, trust_tier (1 port, 2 origin, 3 road, 4 on-board only)
+    ("KDA 412B", "simba", "1+1+2", 14500, 42000, 27000, "container", "E2000017221101441890A001", -3.95, 39.55, 1),
+    ("KDB 118C", "simba", "1+2+3", 16500, 50000, 33000, "flatbed", "E2000017221101441890A002", -4.03, 39.66, 1),
+    ("KDC 905D", "simba", "1+3+3", 17500, 56000, 38000, "container", "E2000017221101441890A003", -1.30, 36.85, 1),
+    ("KCY 377F", "simba", "1+2", 9500, 26000, 16000, "tipper", "E2000017221101441890A004", -3.86, 39.48, 2),
+    ("KDE 230G", "pwani", "1+1+2", 14000, 42000, 27500, "flatbed", "E2000017221101441890B001", -3.80, 39.45, 3),
+    ("KDF 661H", "pwani", "1+2+3", 16000, 50000, 34000, "tanker", "E2000017221101441890B002", -4.05, 39.67, 2),
+    ("KCZ 844J", "pwani", "1+1", 7000, 18000, 11000, "box", None, -1.29, 36.82, 4),
+    ("KDG 102K", "pwani", "1+2+3", 16200, 50000, 33800, "reefer", "E2000017221101441890B004", -0.30, 36.07, 3),
+]
+PERMITS = [
+    # plate, reference, max_length, max_width, max_height, max_gvm, days_valid, route
+    ("KDC 905D", "NTSA-SLP-2026-0417", 24.0, 3.2, 4.6, 56000, 120, "Mombasa – Nairobi (A109), escorted"),
 ]
 
 
@@ -146,29 +158,35 @@ def seed(verbose: bool = True) -> None:
                 db.add(UserPII(user_id=u.id, full_name=full_name, phone_enc=encrypt("+254700000000")))
 
         stations: dict[str, WeighingStation] = {}
-        for code, name, lat, lon, cap, scap, alt in STATIONS:
+        for code, name, lat, lon, cap, scap, alt, kind in STATIONS:
             st = db.execute(select(WeighingStation).where(WeighingStation.code == code)).scalar_one_or_none()
             if st is None:
-                st = WeighingStation(id=stable_id("station", code), code=code, name=name, lat=lat, lon=lon, capacity_per_hour=cap, static_capacity_per_hour=scap, alt_allowed=alt)
+                st = WeighingStation(id=stable_id("station", code), code=code, name=name, lat=lat, lon=lon, capacity_per_hour=cap, static_capacity_per_hour=scap, alt_allowed=alt, kind=kind)
                 db.add(st)
                 db.flush()
-                for lane_no in (1, 2):
-                    lane = Lane(id=stable_id("lane", code, str(lane_no)), station_id=st.id, lane_no=lane_no, type="wim_highspeed", direction="inbound" if lane_no == 1 else "outbound",
-                                device_id=f"gw-{code.lower()}-l{lane_no}", calibration_valid_to=utcnow() + timedelta(days=150))
-                    db.add(lane)
-                    db.flush()
-                    for i, (kind, pos) in enumerate(DEFAULT_LANE_SENSORS):
-                        sensor = Sensor(id=stable_id("sensor", code, str(lane_no), str(i)), lane_id=lane.id, kind=kind, channel=i, install_position_m=pos, serial=f"{code}-L{lane_no}-{kind[:4].upper()}-{i:02d}")
-                        db.add(sensor)
-                        if kind in ("piezo_quartz", "bending_plate"):
-                            db.flush()
-                            db.add(CalibrationRecord(sensor_id=sensor.id, method="reference_vehicle", reference_mass_kg=30000, gain=1.0, offset=0.0,
-                                                     temp_coeff_per_c=-0.002, reference_temp_c=25.0, uncertainty_pct=2.0,
-                                                     valid_from=utcnow() - timedelta(days=30), valid_to=utcnow() + timedelta(days=150),
-                                                     notes="seeded demo calibration (not a real calibration)"))
-                if scap:
-                    db.add(Lane(id=stable_id("lane", code, "9"), station_id=st.id, lane_no=9, type="static", direction="inbound", device_id=f"static-{code.lower()}"))
                 db.add(QueueRecord(station_id=st.id, ts=utcnow(), kind="observed", queue_len=12, avg_wait_s=900, utilisation=0.6, arrivals_per_hour=cap * 0.6, source="simulated"))
+            elif st.kind != kind or st.name != name:
+                st.kind, st.name, st.static_capacity_per_hour = kind, name, scap  # upgrade an existing v1 seed in place
+            # lanes are seeded idempotently so an existing v1 database gains the v2 lanes (port gate-out, origin scale, verification lane)
+            existing = {ln.lane_no for ln in db.execute(select(Lane).where(Lane.station_id == st.id)).scalars()}
+            for lane_no, ltype, direction, legal in LANES_BY_KIND[kind]:
+                if lane_no in existing:
+                    continue
+                lane = Lane(id=stable_id("lane", code, str(lane_no)), station_id=st.id, lane_no=lane_no, type=ltype, direction=direction, legal_grade=legal,
+                            device_id=f"gw-{code.lower()}-l{lane_no}", calibration_valid_to=utcnow() + timedelta(days=150))
+                db.add(lane)
+                db.flush()
+                for i, (skind, pos) in enumerate(SENSORS_BY_LANE_TYPE.get(ltype, DEFAULT_LANE_SENSORS)):
+                    sensor = Sensor(id=stable_id("sensor", code, str(lane_no), str(i)), lane_id=lane.id, kind=skind, channel=i, install_position_m=pos, serial=f"{code}-L{lane_no}-{skind[:4].upper()}-{i:02d}")
+                    db.add(sensor)
+                    if skind in ("piezo_quartz", "bending_plate", "wheel_load_cell"):
+                        db.flush()
+                        db.add(CalibrationRecord(sensor_id=sensor.id, method="reference_vehicle" if skind != "wheel_load_cell" else "static_scale_comparison", reference_mass_kg=30000, gain=1.0, offset=0.0,
+                                                 temp_coeff_per_c=-0.002, reference_temp_c=25.0, uncertainty_pct=2.0 if skind != "wheel_load_cell" else 1.0,
+                                                 valid_from=utcnow() - timedelta(days=30), valid_to=utcnow() + timedelta(days=60),  # quarterly calibration (Reg 6)
+                                                 notes="seeded demo calibration (not a real calibration)"))
+            if scap and 9 not in existing:
+                db.add(Lane(id=stable_id("lane", code, "9"), station_id=st.id, lane_no=9, type="static", direction="inbound", device_id=f"static-{code.lower()}", legal_grade=True))
             stations[code] = st
 
         fleets: dict[str, Fleet] = {}
@@ -181,16 +199,20 @@ def seed(verbose: bool = True) -> None:
             fleets[key] = f
 
         vehicles: dict[str, Vehicle] = {}
-        for plate, org_key, cfg, tare, gvm, payload, body, epc, lat, lon in VEHICLES:
+        for plate, org_key, cfg, tare, gvm, payload, body, epc, lat, lon, tier in VEHICLES:
             v = db.execute(select(Vehicle).where(Vehicle.plate == plate)).scalar_one_or_none()
             if v is None:
                 v = Vehicle(id=stable_id("vehicle", plate), org_id=orgs[org_key].id, fleet_id=fleets[org_key].id, plate=plate, plate_norm=normalise_plate(plate), axle_config=cfg, class_code=f"HGV{sum(int(x) for x in cfg.split('+'))}",
-                            tare_kg=tare, max_gvm_kg=gvm, payload_capacity_kg=payload, body_type=body, last_lat=lat, last_lon=lon, last_seen_at=utcnow())
+                            tare_kg=tare, max_gvm_kg=gvm, payload_capacity_kg=payload, body_type=body, last_lat=lat, last_lon=lon, last_seen_at=utcnow(), trust_tier=tier, enrolled_at=utcnow())
                 db.add(v)
                 db.flush()
                 if epc:
                     db.add(RfidTag(epc=epc, vehicle_id=v.id, issued_at=utcnow()))
             vehicles[plate] = v
+        for plate, ref, ml, mw, mh, mg, days, route in PERMITS:
+            if plate in vehicles and db.execute(select(SpecialLoadPermit).where(SpecialLoadPermit.reference == ref)).scalar_one_or_none() is None:
+                db.add(SpecialLoadPermit(id=stable_id("permit", ref), vehicle_id=vehicles[plate].id, reference=ref, max_length_m=ml, max_width_m=mw, max_height_m=mh, max_gvm_kg=mg,
+                                         valid_from=utcnow() - timedelta(days=5), valid_to=utcnow() + timedelta(days=days), route=route, issued_by="NTSA (seeded demo permit)"))
 
         wh = db.execute(select(Warehouse).where(Warehouse.org_id == orgs["icd"].id)).scalar_one_or_none()
         if wh is None:

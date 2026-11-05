@@ -37,7 +37,26 @@ def get_engine() -> Engine:
         else:
             kwargs["pool_pre_ping"] = True
             kwargs["pool_size"] = 10
-            _engine = create_engine(s.database_url, **kwargs)
+            kwargs["pool_recycle"] = 300
+            connect_args: dict = {}
+            url = s.database_url
+            if "supabase.co" in url or "supabase.com" in url or s.db_require_ssl:
+                connect_args["sslmode"] = "require"
+            if "pooler.supabase.com" in url or s.db_pooler_transaction_mode:
+                # Supavisor / PgBouncer transaction mode cannot track server-side prepared statements: psycopg 3 would
+                # otherwise start preparing after 5 executions of the same statement and fail with "prepared statement
+                # does not exist". Session mode (port 5432 on the pooler) tolerates them but disabling is harmless there too.
+                connect_args["prepare_threshold"] = None
+                kwargs["pool_size"] = 5
+            if "supabase" in url:
+                # A remote database costs 300-600 ms per round trip from Kenya. pool_pre_ping would add one such trip to
+                # every request; instead recycle connections before the pooler's idle timeout and keep them alive.
+                kwargs["pool_pre_ping"] = False
+                kwargs["pool_recycle"] = 240
+                connect_args.update({"keepalives": 1, "keepalives_idle": 30, "keepalives_interval": 10, "keepalives_count": 3})
+            if connect_args:
+                kwargs["connect_args"] = connect_args
+            _engine = create_engine(url, **kwargs)
         _SessionLocal = sessionmaker(bind=_engine, autoflush=False, expire_on_commit=False)
     return _engine
 

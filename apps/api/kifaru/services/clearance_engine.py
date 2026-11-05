@@ -1,6 +1,14 @@
-"""Deterministic, evidence-based rolling clearance engine (Module 2).
+"""Deterministic, evidence-based rolling clearance engine (Module 2, RCS v2).
 
-Decision outputs: GREEN (continue), AMBER (static verification), RED (inspection).
+Decision outputs: GREEN (continue), AMBER (verification), RED (inspection), plus a *route* that says where the truck
+goes next in the RCS v2 chain: continue | verification_lane | static_scale | port_reweigh | hold.
+
+RCS v2 additions (docs/02-architecture/rcs-v2-api-contract.md §2):
+  * Load Compliance Token consistency: a valid token from an earlier verified weighing point means the road reading only
+    has to confirm the weight is unchanged (tolerance by token source); the near-limit AMBER rules are then informational.
+  * Dimension portal and lifted-axle checks, special-load permits.
+  * Discretion allowance (Second Schedule, < 5 % of allowed load) as a configured policy value in LimitSet.
+  * Audit rate by trust tier.
 
 Design rules (non-negotiable, see RTM RCS-04..RCS-10, AGT-02):
   * The engine is a pure function of its inputs; no randomness except the audit sampler, which is seeded and logged.
@@ -20,8 +28,26 @@ from typing import Literal
 
 from .limits import DEFAULT_LIMITS, LimitSet, parse_axle_config
 
-ENGINE_VERSION = "clr-1.2.0"
+ENGINE_VERSION = "clr-2.0.0"
 Decision = Literal["GREEN", "AMBER", "RED"]
+Route = Literal["continue", "verification_lane", "static_scale", "port_reweigh", "hold"]
+NodeKind = Literal["port_gateout", "origin", "road_mainline", "verification_lane", "static"]
+
+# Consistency tolerance between a token weight and a later reading, by token source (RCS v2 plan §6.4):
+# about 8 % for port / origin / lane tokens (3 combined standard deviations at 1 % + 2.5 % errors), about 11 % for road tokens.
+TOKEN_TOLERANCE: dict[str, float] = {"port": 0.08, "origin": 0.08, "lane": 0.08, "road": 0.11}
+# Nodes that may issue a token on GREEN
+TOKEN_ISSUING_NODES = {"port_gateout", "origin", "road_mainline", "verification_lane"}
+NODE_TO_TOKEN_SOURCE = {"port_gateout": "port", "origin": "origin", "road_mainline": "road", "verification_lane": "lane"}
+TRUST_TIER_BY_SOURCE = {"port": 1, "origin": 2, "road": 3, "lane": 3, "onboard": 4}
+DEFAULT_AUDIT_RATE_BY_TIER: dict[int, float] = {1: 0.02, 2: 0.04, 3: 0.03, 4: 1.0}
+INSTRUCTIONS_BY_ROUTE: dict[str, str] = {
+    "continue": "Continue — no stop required",
+    "verification_lane": "Divert to the rolling verification lane (about 10 km/h, no stop)",
+    "static_scale": "Proceed to the static scale for legal weighing",
+    "port_reweigh": "Return to the port re-weigh lane",
+    "hold": "Hold for corrective action",
+}
 
 # quality flags that make a measurement unusable for an automatic GREEN
 BLOCKING_QUALITY_FLAGS = {
@@ -88,6 +114,43 @@ class CargoInput:
 
 
 @dataclass
+class TokenInput:
+    """An active Load Compliance Token found for the vehicle at this node (RCS v2 §6.2)."""
+
+    token_id: str
+    token_ref: str
+    source: str  # port | origin | road | lane
+    trust_tier: int
+    gvm_kg: float
+    valid: bool = True  # inside its validity window
+    status: str = "active"  # active | expired | suspended | revoked
+    identity_match: bool = True  # plate / tag / seal at this node agree with the token
+    issued_at: str | None = None
+    expires_at: str | None = None
+
+
+@dataclass
+class PermitInput:
+    reference: str
+    max_length_m: float
+    max_width_m: float
+    max_height_m: float
+    max_gvm_kg: int | None = None
+    valid: bool = True
+
+
+@dataclass
+class DimensionsInput:
+    """Dimension portal (LiDAR / light curtain) and side-LiDAR readings; None when the node has no portal."""
+
+    length_m: float | None = None
+    width_m: float | None = None
+    height_m: float | None = None
+    lifted_axle: bool = False
+    permit: PermitInput | None = None
+
+
+@dataclass
 class RuleResult:
     rule: str
     severity: Literal["RED", "AMBER", "INFO"]
@@ -106,6 +169,11 @@ class ClearanceResult:
     audit_seed: int | None
     limits_version: str
     engine_version: str = ENGINE_VERSION
+    route: Route = "continue"
+    node_kind: str = "road_mainline"
+    token_eligible: bool = False  # GREEN at a token-issuing node: the caller may issue a Load Compliance Token
+    token_consistent: bool | None = None  # None when no token was presented
+    instruction: str = INSTRUCTIONS_BY_ROUTE["continue"]
 
     @property
     def rules_fired(self) -> list[dict]:
@@ -123,6 +191,11 @@ class ClearanceResult:
             "audit_seed": self.audit_seed,
             "limits_version": self.limits_version,
             "engine_version": self.engine_version,
+            "route": self.route,
+            "node_kind": self.node_kind,
+            "token_eligible": self.token_eligible,
+            "token_consistent": self.token_consistent,
+            "instruction": self.instruction,
         }
 
 
@@ -150,6 +223,11 @@ def decide(
     audit_seed: int | None = None,
     lane_calibration_valid: bool = True,
     require_two_sources: bool = False,
+    token: TokenInput | None = None,
+    dimensions: DimensionsInput | None = None,
+    node_kind: str = "road_mainline",
+    lane_available: bool = False,
+    audit_rate_by_tier: dict[int, float] | None = None,
 ) -> ClearanceResult:
     rules: list[RuleResult] = []
     cargo = cargo or CargoInput()
@@ -157,25 +235,46 @@ def decide(
     if not lane_calibration_valid:
         flags.add("calibration_expired")
 
+    # ---------------------------------------------------------------- token status (RCS v2)
+    token_ok = False
+    token_consistent: bool | None = None
+    if token is not None:
+        token_ok = token.valid and token.status == "active" and token.identity_match
+        tol = TOKEN_TOLERANCE.get(token.source, 0.08)
+        diff = m.gvm_kg - token.gvm_kg
+        token_consistent = abs(diff) <= tol * token.gvm_kg if token.gvm_kg else False
+
     # ---------------------------------------------------------------- limits for this vehicle
     group_sizes = [len([a for a in m.axles if a.group_no == g]) for g in sorted({a.group_no for a in m.axles})]
     gvm_limit = limits.gvm_limit_for_config(group_sizes) if group_sizes else limits.gvm_max_kg
     if vehicle is not None:
         gvm_limit = min(gvm_limit, vehicle.max_gvm_kg) if vehicle.max_gvm_kg else gvm_limit
-    gvm_tol = gvm_limit * (1 + limits.gvm_tolerance_pct / 100.0)
+    allowance_kg = limits.allowance_kg(gvm_limit)
+    gvm_tol = gvm_limit * (1 + limits.gvm_tolerance_pct / 100.0) + allowance_kg
 
     margins: dict = {
         "gvm": {
             "measured_kg": round(m.gvm_kg),
             "u_kg": round(m.gvm_u_kg),
             "limit_kg": gvm_limit,
+            "allowance_kg": round(allowance_kg),
             "limit_with_tolerance_kg": round(gvm_tol),
             "margin_kg": round(gvm_tol - (m.gvm_kg + m.gvm_u_kg + limits.green_safety_margin_kg)),
+            "overload_kg": round(max(0.0, m.gvm_kg - gvm_tol)),
         },
         "groups": [],
         "identity": {"confidence": round(identity.confidence, 3), "threshold": identity_min_confidence, "method": identity.method},
         "quality_flags": sorted(flags),
+        "node_kind": node_kind,
     }
+    if token is not None:
+        tol = TOKEN_TOLERANCE.get(token.source, 0.08)
+        margins["token"] = {
+            "token_ref": token.token_ref, "source": token.source, "trust_tier": token.trust_tier, "token_gvm_kg": round(token.gvm_kg),
+            "diff_kg": round(m.gvm_kg - token.gvm_kg), "tolerance_kg": round(tol * token.gvm_kg), "tolerance_pct": round(tol * 100, 1),
+            "status": token.status, "valid": token.valid, "identity_match": token.identity_match, "consistent": token_consistent,
+        }
+    rules.append(RuleResult("DISCRETION_ALLOWANCE", "INFO", allowance_kg > 0, f"discretion allowance {allowance_kg:.0f} kg ({limits.discretion_allowance_pct} %) applied to the limit" if allowance_kg > 0 else "no discretion allowance applied"))
 
     # ---------------------------------------------------------------- quality rules (block GREEN)
     blocking = sorted(flags & BLOCKING_QUALITY_FLAGS)
@@ -197,6 +296,10 @@ def decide(
     # ---------------------------------------------------------------- weight rules
     certain_over = (m.gvm_kg - m.gvm_u_kg) > gvm_tol
     possible_over = (m.gvm_kg + m.gvm_u_kg + limits.green_safety_margin_kg) > gvm_tol
+    # A valid, consistent token means the earlier verified weighing already settled the near-limit question for this load:
+    # the road reading only has to confirm the weight is unchanged (RCS v2 §6.4). Certain overloads still go RED.
+    token_covers = token_ok and bool(token_consistent)
+    near_limit_severity = "INFO" if token_covers else "AMBER"
     rules.append(
         RuleResult(
             "GVM_OVER_CERTAIN",
@@ -208,9 +311,9 @@ def decide(
     rules.append(
         RuleResult(
             "GVM_OVER_POSSIBLE",
-            "AMBER",
+            near_limit_severity,
             possible_over and not certain_over,
-            f"GVM {m.gvm_kg:.0f} kg plus U {m.gvm_u_kg:.0f} kg plus margin exceeds {gvm_tol:.0f} kg; static verification required"
+            (f"GVM {m.gvm_kg:.0f} kg plus U {m.gvm_u_kg:.0f} kg plus margin exceeds {gvm_tol:.0f} kg; " + ("covered by token consistency" if token_covers else "verification required"))
             if (possible_over and not certain_over)
             else "GVM clear of limit with margin",
         )
@@ -221,7 +324,7 @@ def decide(
     for idx, (g, load, u) in enumerate(_group_loads(m.axles)):
         size = len([a for a in m.axles if a.group_no == g])
         lim = limits.group_limit_kg(idx, size)
-        lim_tol = lim * (1 + limits.axle_tolerance_pct / 100.0)
+        lim_tol = lim * (1 + limits.axle_tolerance_pct / 100.0) + limits.allowance_kg(lim)
         certain = (load - u) > lim_tol
         possible = (load + u + limits.green_safety_margin_kg) > lim_tol
         any_group_certain |= certain
@@ -238,7 +341,45 @@ def decide(
             }
         )
     rules.append(RuleResult("AXLE_GROUP_OVER_CERTAIN", "RED", any_group_certain, "an axle group exceeds its limit beyond uncertainty" if any_group_certain else "no axle group certainly over"))
-    rules.append(RuleResult("AXLE_GROUP_OVER_POSSIBLE", "AMBER", any_group_possible, "an axle group is within uncertainty of its limit" if any_group_possible else "axle groups clear with margin"))
+    rules.append(RuleResult("AXLE_GROUP_OVER_POSSIBLE", near_limit_severity, any_group_possible, ("an axle group is within uncertainty of its limit" + ("; covered by token consistency" if token_covers else "")) if any_group_possible else "axle groups clear with margin"))
+    rules.append(RuleResult("TOKEN_COVERS_MARGIN", "INFO", token_covers and (possible_over or any_group_possible) and not certain_over and not any_group_certain,
+                            "near-limit checks covered by a valid consistent token: only weight consistency is tested on the road" if token_covers else "no token coverage"))
+
+    # ---------------------------------------------------------------- token rules (RCS v2)
+    if token is not None:
+        rules.append(RuleResult("TOKEN_PRESENT", "INFO", True, f"token {token.token_ref} ({token.source}, tier {token.trust_tier}) presented"))
+        expired = not token.valid or token.status == "expired"
+        rules.append(RuleResult("TOKEN_EXPIRED", "AMBER", expired, f"token {token.token_ref} outside its validity window" if expired else "token within validity window"))
+        suspended = token.status in ("suspended", "revoked")
+        rules.append(RuleResult("TOKEN_SUSPENDED", "AMBER", suspended, f"token {token.token_ref} {token.status}" if suspended else "token not suspended"))
+        mismatch = not token.identity_match
+        rules.append(RuleResult("TOKEN_IDENTITY_MISMATCH", "RED", mismatch, "token plate / tag / seal do not match this node's identity read (possible token fraud)" if mismatch else "token identity matches"))
+        inconsistent = token_ok and not token_consistent
+        rules.append(RuleResult("TOKEN_WEIGHT_INCONSISTENT", "AMBER", inconsistent,
+                                f"GVM {m.gvm_kg:.0f} kg differs from token {token.gvm_kg:.0f} kg by more than {TOKEN_TOLERANCE.get(token.source, 0.08):.0%}; cargo may have changed since issue" if inconsistent
+                                else ("weight consistent with token" if token_ok else "token not usable for consistency")))
+
+    # ---------------------------------------------------------------- dimensions, lifted axle, permits (RCS v2 §5)
+    if dimensions is not None:
+        breaches = limits.dimension_breaches(dimensions.length_m, dimensions.width_m, dimensions.height_m)
+        permit = dimensions.permit
+        permitted = False
+        if breaches and permit is not None and permit.valid:
+            permitted = (
+                (dimensions.length_m is None or dimensions.length_m <= permit.max_length_m)
+                and (dimensions.width_m is None or dimensions.width_m <= permit.max_width_m)
+                and (dimensions.height_m is None or dimensions.height_m <= permit.max_height_m)
+                and (permit.max_gvm_kg is None or m.gvm_kg <= permit.max_gvm_kg)
+            )
+        margins["dimensions"] = {
+            "length_m": dimensions.length_m, "width_m": dimensions.width_m, "height_m": dimensions.height_m,
+            "max_length_m": limits.max_length_m, "max_width_m": limits.max_width_m, "max_height_m": limits.max_height_m,
+            "breaches": breaches, "lifted_axle": dimensions.lifted_axle, "permit_ref": permit.reference if permit else None, "permitted": permitted,
+        }
+        over = bool(breaches) and not permitted
+        rules.append(RuleResult("DIMENSION_OVER", "RED", over, "dimension limit exceeded without a valid permit: " + "; ".join(breaches) if over else ("dimensions within limits" if not breaches else "oversize covered by permit")))
+        rules.append(RuleResult("DIMENSION_PERMITTED", "INFO", permitted, f"oversize within special-load permit {permit.reference}" if permitted else "no permit needed or none valid"))
+        rules.append(RuleResult("LIFTED_AXLE", "AMBER", dimensions.lifted_axle, "lifted axle detected: axle configuration differs from registration; axle loads must be verified" if dimensions.lifted_axle else "no lifted axle"))
 
     # ---------------------------------------------------------------- identity rules
     conflict = identity.method == "conflict"
@@ -280,8 +421,11 @@ def decide(
 
     # ---------------------------------------------------------------- random audit (seeded, logged)
     seed = audit_seed if audit_seed is not None else random.SystemRandom().randrange(2**31)
-    audit = random.Random(seed).random() < audit_rate
-    rules.append(RuleResult("RANDOM_AUDIT", "AMBER", audit, f"selected for random audit (rate {audit_rate:.1%}, seed {seed})" if audit else "not selected for audit"))
+    effective_rate = audit_rate
+    if audit_rate_by_tier and token is not None and token.trust_tier in audit_rate_by_tier:
+        effective_rate = audit_rate_by_tier[token.trust_tier]
+    audit = random.Random(seed).random() < effective_rate
+    rules.append(RuleResult("RANDOM_AUDIT", "AMBER", audit, f"selected for random audit (rate {effective_rate:.1%}, seed {seed})" if audit else "not selected for audit"))
 
     # ---------------------------------------------------------------- resolve
     fired = [r for r in rules if r.fired]
@@ -292,13 +436,17 @@ def decide(
     else:
         decision = "GREEN"
 
+    route = route_for(decision, node_kind, lane_available)
+    token_eligible = decision == "GREEN" and node_kind in TOKEN_ISSUING_NODES
+
     if decision == "GREEN":
         explanation = (
-            f"GREEN: GVM {m.gvm_kg:.0f} kg ± {m.gvm_u_kg:.0f} kg is within {gvm_tol:.0f} kg with margin; all axle groups within limits; "
-            f"identity {identity.method} at {identity.confidence:.2f}; measurement quality acceptable. Source: {m.source}."
+            f"GREEN: GVM {m.gvm_kg:.0f} kg ± {m.gvm_u_kg:.0f} kg is within {gvm_tol:.0f} kg"
+            + (" (token consistency covers the near-limit margin)" if token_covers and (possible_over or any_group_possible) else " with margin")
+            + f"; all axle groups within limits; identity {identity.method} at {identity.confidence:.2f}; measurement quality acceptable. Source: {m.source}."
         )
     else:
-        explanation = f"{decision}: " + "; ".join(r.detail for r in fired if r.severity != "INFO") + f". Source: {m.source}."
+        explanation = f"{decision}: " + "; ".join(r.detail for r in fired if r.severity != "INFO") + f". Route: {route}. Source: {m.source}."
 
     evidence = {
         "engine": ENGINE_VERSION,
@@ -310,6 +458,26 @@ def decide(
         "rules": [asdict(r) for r in rules],
         "decision": decision,
         "audit_seed": seed,
+        "token": asdict(token) if token else None,
+        "dimensions": asdict(dimensions) if dimensions else None,
+        "node_kind": node_kind,
+        "route": route,
     }
     evidence_hash = hashlib.sha256(json.dumps(evidence, sort_keys=True, default=str).encode()).hexdigest()
-    return ClearanceResult(decision, rules, margins, explanation, evidence_hash, audit, seed, limits.version)
+    return ClearanceResult(decision, rules, margins, explanation, evidence_hash, audit, seed, limits.version,
+                           route=route, node_kind=node_kind, token_eligible=token_eligible, token_consistent=token_consistent,
+                           instruction=INSTRUCTIONS_BY_ROUTE[route])
+
+
+def route_for(decision: str, node_kind: str, lane_available: bool) -> Route:
+    """Where the truck goes next (RCS v2 §6.4). The static scale remains the legal proof for RED cases (Reg 4(6), 18(3))."""
+    if decision == "GREEN":
+        return "continue"
+    if decision == "RED":
+        return "hold" if node_kind == "port_gateout" else "static_scale"
+    # AMBER
+    if node_kind == "port_gateout":
+        return "port_reweigh"
+    if node_kind == "road_mainline" and lane_available:
+        return "verification_lane"
+    return "static_scale"

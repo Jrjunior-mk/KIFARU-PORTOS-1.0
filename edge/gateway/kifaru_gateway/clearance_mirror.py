@@ -46,6 +46,8 @@ class Snapshot:
 
     def limit_set(self) -> LimitSet:
         d = dict(self.limits)
+        if "fee_points" in d:  # JSON round-trip turns the tuple-of-tuples fee table into lists
+            d["fee_points"] = tuple((int(k), float(f)) for k, f in d["fee_points"])
         d.pop("notes", None)
         return LimitSet(**d)
 

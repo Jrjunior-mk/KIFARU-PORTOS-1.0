@@ -30,6 +30,7 @@ METRIC_COLUMNS: list[tuple[str, str, str]] = [
     ("mean_queue_static", "Mean static queue", "{:.1f}"),
     ("max_queue_static", "Max static queue", "{:.0f}"),
     ("pct_stopped", "% trucks stopped", "{:.1f}"),
+    ("pct_lane", "% via verification lane", "{:.1f}"),
     ("static_utilisation_pct", "Static-scale utilisation (%)", "{:.0f}"),
     ("stops_avoided_vs_baseline", "Stops avoided vs baseline", "{:.0f}"),
     ("fuel_l_modelled", "Fuel, modelled (L)", "{:.0f}"),

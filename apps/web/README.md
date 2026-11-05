@@ -44,15 +44,23 @@ render an "Access restricted" card otherwise.
 | Route | Roles |
 |---|---|
 | `/login` | public |
+| `/about` | public — how RCS v2 (port-anchored clearance) works |
 | `/verify/:qrToken`, `/verify` | public (GET /api/v1/tickets/verify/{token}) |
+| `/verify/token/:tokenRef` | public (GET /api/v1/rcs/tokens/verify/{ref}) — Load Compliance Token check |
 | `/control` | port_controller, auditor, regulator_readonly |
 | `/operator` | weighbridge_operator |
 | `/transporter` | transporter_admin, dispatcher |
 | `/driver` | driver |
 | `/owner` | cargo_owner |
 | `/warehouse` | warehouse_manager |
+| `/registry` | port_controller, weighbridge_operator, auditor, regulator_readonly — tokens, release orders, permits, trust tiers and policy (`/api/v1/rcs/*`) |
+| `/model` | port_controller, auditor, regulator_readonly — RCS v2 Monte Carlo explorer (`POST /api/v1/rcs/model`, `/model/sweep`), all output labelled MODELLED |
 | `/twin` | port_controller, weighbridge_operator, auditor, regulator_readonly, transporter_admin, dispatcher |
 | `/admin` | platform_admin |
+
+The RCS v2 screens are built against `docs/02-architecture/rcs-v2-api-contract.md`. The shell is a collapsible sidebar
+(groups: Operations, Registry, Analysis, Admin) with a slim top bar; the design tokens live in `tailwind.config.js`
+(`brand` teal, `ink` navy, `surface` neutrals, decision colours reserved for GREEN/AMBER/RED) and `src/index.css`.
 
 ## Architecture notes
 

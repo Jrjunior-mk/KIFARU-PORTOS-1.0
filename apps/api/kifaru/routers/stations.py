@@ -5,11 +5,14 @@ from datetime import UTC, datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
+from sqlalchemy.orm import joinedload
 
 from ..deps import CurrentUser, DbDep, Principal, audit, require_roles
 from ..events import EventType, publish
 from ..models import (
+    LANE_TYPES,
     SENSOR_KINDS,
+    STATION_KINDS,
     CalibrationRecord,
     ClearanceDecision,
     Incident,
@@ -30,7 +33,22 @@ DEFAULT_LANE_SENSORS = [
     ("piezo_quartz", 16.0), ("inductive_loop", 19.0), ("ir_beam", 4.0), ("radar_speed", -15.0), ("anpr_camera", -25.0),
     ("rfid_reader", -15.0), ("pavement_temp", 7.0), ("ambient_temp_rh", 30.0),
 ]
-LOAD_SENSOR_KINDS = ("piezo_quartz", "piezo_polymer", "bending_plate", "strain_gauge")
+LOAD_SENSOR_KINDS = ("piezo_quartz", "piezo_polymer", "bending_plate", "strain_gauge", "wheel_load_cell")
+# RCS v2 lane sensor sets (position in metres along the lane; negative = upstream of the measuring zone)
+VERIFICATION_LANE_SENSORS = [
+    ("inductive_loop", -5.0), ("wheel_load_cell", 0.0), ("wheel_load_cell", 0.0), ("wheel_load_cell", 1.4), ("wheel_load_cell", 1.4),
+    ("lidar_portal", -8.0), ("light_curtain", -8.0), ("side_lidar", 2.0), ("anpr_camera", -20.0), ("rfid_reader", -12.0), ("radar_speed", -30.0),
+    ("inductive_loop", 15.0), ("ambient_temp_rh", 10.0),
+]
+PORT_GATEOUT_SENSORS = [
+    ("inductive_loop", -5.0), ("wheel_load_cell", 0.0), ("wheel_load_cell", 0.0), ("lidar_portal", -6.0), ("light_curtain", -6.0),
+    ("anpr_camera", -15.0), ("rfid_reader", -10.0), ("container_ocr", -6.0), ("eseal_reader", -10.0), ("inductive_loop", 12.0),
+]
+ORIGIN_SCALE_SENSORS = [("wheel_load_cell", 0.0), ("wheel_load_cell", 0.0), ("anpr_camera", -8.0), ("rfid_reader", -8.0)]
+SENSORS_BY_LANE_TYPE = {
+    "wim_highspeed": DEFAULT_LANE_SENSORS, "wim_lowspeed": DEFAULT_LANE_SENSORS, "rolling_verification": VERIFICATION_LANE_SENSORS,
+    "port_gateout": PORT_GATEOUT_SENSORS, "origin_scale": ORIGIN_SCALE_SENSORS, "static": [],
+}
 
 
 class SensorOut(BaseModel):
@@ -54,6 +72,7 @@ class LaneOut(BaseModel):
     device_id: str | None
     calibration_valid_to: datetime | None
     sensors: list[SensorOut]
+    legal_grade: bool = False
 
 
 class StationOut(BaseModel):
@@ -67,6 +86,7 @@ class StationOut(BaseModel):
     alt_allowed: bool
     status: str
     lanes: list[LaneOut]
+    kind: str = "road_station"
     queue_len: int
     avg_wait_s: int
     utilisation: float
@@ -88,28 +108,54 @@ def _sensor_out(s: Sensor) -> SensorOut:
 
 def _lane_out(ln: Lane) -> LaneOut:
     return LaneOut(id=ln.id, lane_no=ln.lane_no, type=ln.type, direction=ln.direction, status=ln.status, device_id=ln.device_id,
-                   calibration_valid_to=ln.calibration_valid_to, sensors=[_sensor_out(s) for s in ln.sensors])
+                   calibration_valid_to=ln.calibration_valid_to, sensors=[_sensor_out(s) for s in ln.sensors], legal_grade=bool(ln.legal_grade))
+
+
+def _stations_out(db, stations: list[WeighingStation]) -> list[StationOut]:
+    """Builds the station views with a fixed number of queries regardless of station count (the database may be remote,
+    e.g. Supabase, where every round trip costs hundreds of milliseconds)."""
+    if not stations:
+        return []
+    ids = [st.id for st in stations]
+    # latest observed queue record per station (one query)
+    latest_ts = (
+        select(QueueRecord.station_id, func.max(QueueRecord.ts).label("ts"))
+        .where(QueueRecord.station_id.in_(ids), QueueRecord.kind == "observed").group_by(QueueRecord.station_id).subquery()
+    )
+    queues = {
+        q.station_id: q
+        for q in db.execute(select(QueueRecord).join(latest_ts, (QueueRecord.station_id == latest_ts.c.station_id) & (QueueRecord.ts == latest_ts.c.ts))).scalars()
+    }
+    # decisions in the last hour per station (one query)
+    since = utcnow() - timedelta(hours=1)
+    counts: dict[str, dict[str, int]] = {sid: {"GREEN": 0, "AMBER": 0, "RED": 0} for sid in ids}
+    rows = db.execute(
+        select(WeighingEvent.station_id, ClearanceDecision.decision, func.count()).join(WeighingEvent, WeighingEvent.id == ClearanceDecision.weighing_event_id)
+        .where(WeighingEvent.station_id.in_(ids), ClearanceDecision.decided_at >= since).group_by(WeighingEvent.station_id, ClearanceDecision.decision)
+    ).all()
+    for sid, d, c in rows:
+        counts.setdefault(sid, {"GREEN": 0, "AMBER": 0, "RED": 0})[d] = c
+    out = []
+    for st in stations:
+        q = queues.get(st.id)
+        out.append(StationOut(id=st.id, code=st.code, name=st.name, lat=st.lat, lon=st.lon, capacity_per_hour=st.capacity_per_hour,
+                              static_capacity_per_hour=st.static_capacity_per_hour, alt_allowed=st.alt_allowed, status=st.status, kind=st.kind or "road_station",
+                              lanes=[_lane_out(ln) for ln in st.lanes], queue_len=q.queue_len if q else 0, avg_wait_s=q.avg_wait_s if q else 0,
+                              utilisation=q.utilisation if q else 0.0, decisions_last_hour=counts[st.id]))
+    return out
 
 
 def _station_out(db, st: WeighingStation) -> StationOut:
-    q = db.execute(select(QueueRecord).where(QueueRecord.station_id == st.id, QueueRecord.kind == "observed").order_by(QueueRecord.ts.desc()).limit(1)).scalar_one_or_none()
-    since = utcnow() - timedelta(hours=1)
-    rows = db.execute(
-        select(ClearanceDecision.decision, func.count()).join(WeighingEvent, WeighingEvent.id == ClearanceDecision.weighing_event_id)
-        .where(WeighingEvent.station_id == st.id, ClearanceDecision.decided_at >= since).group_by(ClearanceDecision.decision)
-    ).all()
-    counts = {"GREEN": 0, "AMBER": 0, "RED": 0}
-    for d, c in rows:
-        counts[d] = c
-    return StationOut(id=st.id, code=st.code, name=st.name, lat=st.lat, lon=st.lon, capacity_per_hour=st.capacity_per_hour,
-                      static_capacity_per_hour=st.static_capacity_per_hour, alt_allowed=st.alt_allowed, status=st.status,
-                      lanes=[_lane_out(ln) for ln in st.lanes], queue_len=q.queue_len if q else 0, avg_wait_s=q.avg_wait_s if q else 0,
-                      utilisation=q.utilisation if q else 0.0, decisions_last_hour=counts)
+    return _stations_out(db, [st])[0]
 
 
 @router.get("", response_model=list[StationOut])
 def list_stations(p: CurrentUser, db: DbDep):
-    return [_station_out(db, s) for s in db.execute(select(WeighingStation).order_by(WeighingStation.code)).scalars()]
+    q = (
+        select(WeighingStation).order_by(WeighingStation.code)
+        .options(joinedload(WeighingStation.lanes).joinedload(Lane.sensors).joinedload(Sensor.calibrations))
+    )
+    return _stations_out(db, list(db.execute(q).unique().scalars()))
 
 
 @router.get("/{station_id}", response_model=StationOut)
@@ -128,6 +174,7 @@ class StationIn(BaseModel):
     capacity_per_hour: int = 120
     static_capacity_per_hour: int = 40
     alt_allowed: bool = False
+    kind: str = Field(default="road_station", pattern="^(road_station|port_gate|origin_site)$")
 
 
 @router.post("", response_model=StationOut, status_code=201)
@@ -164,9 +211,10 @@ def set_station_status(station_id: str, body: StationStatusIn, db: DbDep, p: Pri
 
 class LaneIn(BaseModel):
     lane_no: int = Field(ge=1, le=20)
-    type: str = Field(default="wim_highspeed", pattern="^(wim_highspeed|wim_lowspeed|static)$")
+    type: str = Field(default="wim_highspeed", pattern="^(wim_highspeed|wim_lowspeed|static|port_gateout|origin_scale|rolling_verification)$")
     direction: str = "inbound"
     device_id: str | None = None
+    legal_grade: bool = False
 
 
 @router.post("/{station_id}/lanes", response_model=LaneOut, status_code=201)
@@ -176,9 +224,8 @@ def create_lane(station_id: str, body: LaneIn, db: DbDep, p: Principal = Depends
     lane = Lane(station_id=station_id, **body.model_dump())
     db.add(lane)
     db.flush()
-    if body.type != "static":
-        for i, (kind, pos) in enumerate(DEFAULT_LANE_SENSORS):
-            db.add(Sensor(lane_id=lane.id, kind=kind, channel=i, install_position_m=pos))
+    for i, (kind, pos) in enumerate(SENSORS_BY_LANE_TYPE.get(body.type, DEFAULT_LANE_SENSORS)):
+        db.add(Sensor(lane_id=lane.id, kind=kind, channel=i, install_position_m=pos))
     audit(db, p, "create", "lane", lane.id)
     db.commit()
     db.refresh(lane)
@@ -262,3 +309,8 @@ def list_calibrations(sensor_id: str, p: CurrentUser, db: DbDep):
 @router.get("/meta/sensor-kinds")
 def sensor_kinds():
     return SENSOR_KINDS
+
+
+@router.get("/meta/kinds")
+def station_and_lane_kinds():
+    return {"station_kinds": STATION_KINDS, "lane_types": LANE_TYPES, "sensors_by_lane_type": {k: [kind for kind, _ in v] for k, v in SENSORS_BY_LANE_TYPE.items()}}

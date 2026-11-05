@@ -3,9 +3,10 @@
 Vercel's Python runtime exposes the ASGI `app` object below. Limitations of this hosting mode (documented, not hidden):
   * no WebSockets — the web app falls back to polling /api/v1/events/recent (VITE_WS_DISABLED=1 at build time);
   * no background workers — forecasts/predictions run on request (e.g. POST /shipments/{id}/predict-release);
-  * the filesystem is ephemeral — unless KIFARU_DATABASE_URL points at a hosted PostgreSQL, a per-instance SQLite
-    database is created in /tmp and seeded on cold start, so data does not persist and may differ between instances.
-    This is a DEMO configuration; the production design is ECS + RDS (see docs/02-architecture/cloud-architecture.md).
+  * the filesystem is ephemeral — unless KIFARU_DATABASE_URL (or a Supabase / Vercel-Postgres URL, see below) points at
+    a hosted PostgreSQL, a per-instance SQLite database is created in /tmp and seeded on cold start, so data does not
+    persist and may differ between instances. With Supabase (docs/06-operations/supabase-postgres.md) the data is
+    durable and shared by every instance. This is a DEMO configuration; the production design is ECS + RDS.
 """
 from __future__ import annotations
 
@@ -22,8 +23,9 @@ for rel in ("apps/api", "packages/wim_dsp", "packages/ai_agents", "packages/simu
 os.environ.setdefault("KIFARU_ENV", "dev")
 os.environ.setdefault("KIFARU_LOCAL_OBJECT_DIR", "/tmp/kifaru-objects")
 if not os.environ.get("KIFARU_DATABASE_URL"):
-    # Vercel Marketplace Postgres integrations (Neon, Supabase, ...) inject one of these automatically.
-    hosted = next((os.environ[k] for k in ("DATABASE_URL", "POSTGRES_URL", "POSTGRES_PRISMA_URL", "DATABASE_URL_UNPOOLED") if os.environ.get(k)), None)
+    # Supabase (SUPABASE_DB_URL set by hand, or POSTGRES_URL / DATABASE_URL injected by the Vercel Marketplace integration)
+    # and other hosted Postgres providers. The transaction pooler (port 6543) is preferred for serverless functions.
+    hosted = next((os.environ[k] for k in ("SUPABASE_DB_URL", "POSTGRES_URL", "DATABASE_URL", "POSTGRES_PRISMA_URL", "DATABASE_URL_UNPOOLED") if os.environ.get(k)), None)
     if hosted:
         if hosted.startswith("postgres://"):
             hosted = "postgresql+psycopg://" + hosted[len("postgres://"):]

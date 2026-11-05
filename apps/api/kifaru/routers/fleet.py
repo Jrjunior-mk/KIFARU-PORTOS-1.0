@@ -97,6 +97,8 @@ class VehicleOut(BaseModel):
     last_lon: float | None
     last_seen_at: datetime | None
     watchlisted: bool
+    trust_tier: int = 3
+    demerit_points: int = 0
 
 
 def _v_out(v: Vehicle) -> VehicleOut:
@@ -105,6 +107,7 @@ def _v_out(v: Vehicle) -> VehicleOut:
         class_code=v.class_code, tare_kg=v.tare_kg, max_gvm_kg=v.max_gvm_kg, payload_capacity_kg=v.payload_capacity_kg,
         body_type=v.body_type, status=v.status, rfid_epcs=[t.epc for t in v.tags if t.revoked_at is None],
         last_lat=v.last_lat, last_lon=v.last_lon, last_seen_at=v.last_seen_at, watchlisted=bool(v.watchlist_reason),
+        trust_tier=v.trust_tier or 3, demerit_points=v.demerit_points or 0,
     )
 
 

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { admin as adminApi, environment as envApi, stations as stationsApi, weighing as weighingApi } from '../api/endpoints';
 import type { Decision, LiveEvent, StationOut, WeighingOut, WhatIfOut } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
-import { Badge, Card, Empty, ErrorBanner, Field, Notice, Spinner, Table } from '../components/ui';
+import { Badge, Card, Empty, ErrorBanner, Field, Notice, PageHeader, Spinner, Table } from '../components/ui';
 import { eventSource, useLiveEvents } from '../hooks/useLiveEvents';
 import { useMutation, useQuery } from '../hooks/useQuery';
 import { fmtDuration, fmtNum, fmtPct, fmtTime } from '../lib/format';
@@ -46,6 +46,7 @@ export default function Twin() {
 
   return (
     <div className="space-y-3">
+      <PageHeader eyebrow="Analysis" title="Digital twin" subtitle="3D port and station scene driven by live events; the banner below states whether any event carried source=live." />
       <div role="status" className={`flex flex-wrap items-center justify-between gap-2 rounded-lg px-4 py-2 text-sm font-semibold ${live.hasLive ? 'bg-brand-600 text-white' : 'bg-amber-500 text-slate-950'}`}>
         <span>{live.hasLive ? 'LIVE — events carry source=live from station gateways' : 'SIMULATION MODE — data is simulated (no event with source=live has been received)'}</span>
         <span className="text-xs font-normal">WS {live.status} · {decidedCount} decisions this session · {trucks.length} trucks in scene · {twinStations.map((s) => `${s.code} q${s.queue_len}`).join(' · ')}</span>

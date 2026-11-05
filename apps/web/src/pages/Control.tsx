@@ -1,13 +1,15 @@
 import { lazy, Suspense, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Area, Bar, BarChart, CartesianGrid, Cell, ComposedChart, Legend, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { admin as adminApi, environment as envApi, fleet as fleetApi, queue as queueApi, stations as stationsApi, weighing as weighingApi } from '../api/endpoints';
-import type { IncidentCategory, IncidentIn, LiveEvent, QueueOut, StationOut } from '../api/types';
+import { admin as adminApi, environment as envApi, fleet as fleetApi, queue as queueApi, rcs as rcsApi, stations as stationsApi, weighing as weighingApi } from '../api/endpoints';
+import type { IncidentCategory, IncidentIn, LiveEvent, QueueOut, RcsStatsOut, StationOut } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
-import { Badge, Card, DecisionBadge, Empty, ErrorBanner, Field, Notice, SourceBadge, Spinner, Stat, StatusDot, Table } from '../components/ui';
+import { LaneTypeBadge, ROUTE_COLORS, RouteBadge, ShareBar, StationKindBadge, STREAM_COLORS } from '../components/rcs';
+import { Badge, Card, DecisionBadge, Empty, ErrorBanner, Field, Notice, PageHeader, Skeleton, SourceBadge, Spinner, Stat, StatusDot, Table } from '../components/ui';
 import { eventSource, useLiveEvents } from '../hooks/useLiveEvents';
 import { useMutation, useQuery } from '../hooks/useQuery';
 import { chartTheme, DECISION_COLOR, SERIES, useDarkMode } from '../lib/chart';
 import { fmtAgo, fmtDateTime, fmtDuration, fmtKg, fmtNum, fmtPct, fmtTime, titleCase } from '../lib/format';
+import { laneTypeLabel, ROUTE_LABEL, ROUTES_ALL, streamLabel } from '../lib/rcs';
 
 const StationMap = lazy(() => import('../components/StationMap'));
 const LIVE_TYPES = ['clearance.decided', 'queue.updated', 'station.failure', 'incident.opened', 'sensor.health', 'truck.diverted', 'truck.released'];
@@ -20,10 +22,11 @@ export default function Control() {
   const statsQ = useQuery(() => weighingApi.stats(), [], { pollMs: 30_000 });
   const incidentsQ = useQuery(() => adminApi.incidents('open'), [], { pollMs: 60_000 });
   const envQ = useQuery(() => envApi.report({ hours: 24 }), [], { pollMs: 120_000 });
+  const rcsQ = useQuery(() => rcsApi.stats(), [], { pollMs: 30_000 });
   const [selected, setSelected] = useState<string | null>(null);
 
   const live = useLiveEvents(LIVE_TYPES, null, 200, (ev: LiveEvent) => {
-    if (ev.type === 'clearance.decided' || ev.type === 'queue.updated') { void stationsQ.refetch(); void statsQ.refetch(); }
+    if (ev.type === 'clearance.decided' || ev.type === 'queue.updated') { void stationsQ.refetch(); void statsQ.refetch(); void rcsQ.refetch(); }
     if (ev.type === 'station.failure' || ev.type === 'incident.opened') { void incidentsQ.refetch(); void stationsQ.refetch(); }
   });
   const feed = useMemo(() => live.events.filter((e) => e.type === 'clearance.decided').slice().reverse(), [live.events]);
@@ -32,13 +35,11 @@ export default function Control() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div><h1 className="text-xl font-semibold">Port Control Centre</h1><p className="text-sm text-slate-500">Network view · {stations.length} stations · live feed {live.status}</p></div>
-        <div className="flex items-center gap-2 text-xs">
+      <PageHeader eyebrow="Operations" title="Port Control Centre" subtitle={<>Network view · {stations.length} stations · live feed {live.status}</>} actions={
+        <>
           <Badge tone={live.status === 'open' ? 'teal' : 'amber'}>WS {live.status}</Badge>
           <Badge tone={live.hasLive ? 'teal' : 'slate'}>{live.hasLive ? 'live measurements seen' : 'no live measurements — simulated data only'}</Badge>
-        </div>
-      </div>
+        </>} />
       <ErrorBanner error={stationsQ.error} />
 
       <section aria-label="Stations" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -46,19 +47,25 @@ export default function Control() {
         {stations.map((s) => <StationCard key={s.id} s={s} selected={selected === s.id} onSelect={() => setSelected(s.id)} canAct={canAct} onChanged={() => void stationsQ.refetch()} />)}
       </section>
 
+      <Card title="RCS v2 network" subtitle="GET /rcs/stats · truck streams, routes and token coverage across all nodes" actions={<a className="btn-secondary px-2 py-1 text-xs" href="/registry">Open registry</a>}>
+        <ErrorBanner error={rcsQ.error} />
+        {rcsQ.data ? <RcsNetwork s={rcsQ.data} /> : !rcsQ.error && <Skeleton lines={3} />}
+      </Card>
+
       <div className="grid gap-4 lg:grid-cols-3">
         <Card title="Live clearance feed" subtitle="clearance.decided events over WebSocket" className="lg:col-span-1">
           {feed.length === 0 ? <Empty>No clearance events yet in this session. Trigger passes from the Weighbridge console.</Empty> : (
             <ul className="max-h-[420px] space-y-1 overflow-y-auto" aria-live="polite">
               {feed.slice(0, 60).map((e) => {
-                const p = e.payload as { decision?: 'GREEN' | 'AMBER' | 'RED'; plate?: string | null; gvm_kg?: number; latency_ms?: number; rules_fired?: string[] };
+                const p = e.payload as { decision?: 'GREEN' | 'AMBER' | 'RED'; plate?: string | null; gvm_kg?: number; latency_ms?: number; rules_fired?: string[]; route?: string | null; token_ref?: string | null; node_kind?: string | null };
                 const st = stations.find((x) => x.id === e.station_id);
                 return (
-                  <li key={e.event_id} className="flex items-start gap-2 rounded border border-slate-100 px-2 py-1 text-xs dark:border-slate-800">
+                  <li key={e.event_id} className="flex items-start gap-2 rounded-lg border border-ink-100 px-2 py-1 text-xs dark:border-ink-800">
                     <DecisionBadge decision={p.decision} size="sm" />
                     <div className="min-w-0 flex-1">
-                      <div className="flex justify-between gap-2"><span className="font-medium">{p.plate ?? 'unknown plate'}</span><span className="text-slate-400">{fmtTime(e.occurred_at)}</span></div>
-                      <div className="text-slate-500">{st?.code ?? e.station_id} · {fmtKg(p.gvm_kg)} · {p.latency_ms} ms {p.rules_fired?.length ? `· ${p.rules_fired.join(', ')}` : ''}</div>
+                      <div className="flex justify-between gap-2"><span className="font-medium">{p.plate ?? 'unknown plate'}</span><span className="text-ink-400">{fmtTime(e.occurred_at)}</span></div>
+                      <div className="text-ink-500">{st?.code ?? e.station_id} · {fmtKg(p.gvm_kg)} · {p.latency_ms} ms {p.rules_fired?.length ? `· ${p.rules_fired.join(', ')}` : ''}</div>
+                      <div className="mt-0.5 flex flex-wrap items-center gap-1"><RouteBadge route={p.route} decision={p.decision ?? null} nodeKind={p.node_kind} />{p.token_ref && <span className="mono text-ink-500">token {p.token_ref}</span>}</div>
                     </div>
                     <SourceBadge source={eventSource(e)} />
                   </li>
@@ -123,9 +130,10 @@ function StationCard({ s, selected, onSelect, canAct, onChanged }: { s: StationO
   return (
     <article className={`card p-3 ${selected ? 'ring-2 ring-brand-500' : ''}`}>
       <button className="flex w-full items-start justify-between text-left" onClick={onSelect} aria-pressed={selected}>
-        <div><div className="text-xs text-slate-500">{s.code}</div><div className="font-semibold leading-tight">{s.name}</div></div>
+        <div><div className="flex items-center gap-1.5 text-xs text-ink-500"><span>{s.code}</span><StationKindBadge kind={s.kind} /></div><div className="font-semibold leading-tight">{s.name}</div></div>
         <span className="flex items-center gap-1 text-xs"><StatusDot status={s.status} />{s.status}</span>
       </button>
+      <div className="mt-1.5 flex flex-wrap gap-1">{Array.from(new Set(s.lanes.map((l) => l.type))).map((t) => <span key={t} className="chip" title={laneTypeLabel(t)}><LaneTypeBadge type={t} /></span>)}</div>
       <div className="mt-2 grid grid-cols-3 gap-1 text-center">
         <div><div className="text-lg font-semibold tabular-nums">{s.queue_len}</div><div className="text-[10px] uppercase text-slate-500">queue</div></div>
         <div><div className="text-lg font-semibold tabular-nums">{fmtDuration(s.avg_wait_s)}</div><div className="text-[10px] uppercase text-slate-500">avg wait</div></div>
@@ -146,6 +154,20 @@ function StationCard({ s, selected, onSelect, canAct, onChanged }: { s: StationO
       )}
       <ErrorBanner error={setStatus.error} className="mt-2" />
     </article>
+  );
+}
+
+function RcsNetwork({ s }: { s: RcsStatsOut }) {
+  return (
+    <div className="grid gap-4 lg:grid-cols-[1fr_1fr_auto]">
+      <div><div className="section-title mb-1.5">Stream mix</div><ShareBar ariaLabel="Passes by truck stream" colors={STREAM_COLORS} parts={(['port', 'origin', 'untokened'] as const).map((k) => ({ key: k, value: s.by_stream[k] ?? 0, label: streamLabel(k) }))} /></div>
+      <div><div className="section-title mb-1.5">Routes</div><ShareBar ariaLabel="Passes by route" colors={ROUTE_COLORS} parts={ROUTES_ALL.map((k) => ({ key: k, value: s.by_route[k] ?? 0, label: ROUTE_LABEL[k] }))} /></div>
+      <div className="grid grid-cols-3 gap-2 lg:w-[22rem]">
+        <Stat label="Token coverage" value={fmtPct(s.token_coverage)} tone="teal" hint={`${s.tokens_active} active`} />
+        <Stat label="Honoured" value={s.honoured_total} hint="downstream checks" />
+        <Stat label="Open orders" value={s.release_orders_open} tone={s.release_orders_open ? 'red' : 'default'} hint="Reg 14" />
+      </div>
+    </div>
   );
 }
 

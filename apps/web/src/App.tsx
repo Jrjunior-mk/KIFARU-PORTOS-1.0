@@ -5,10 +5,11 @@ import { AuthProvider, useAuth } from './auth/AuthContext';
 import Shell from './components/Shell';
 import { Spinner } from './components/ui';
 import { homeFor } from './lib/roles';
+import About from './pages/About';
 import Login from './pages/Login';
 import Verify from './pages/Verify';
 
-// Heavy routes are lazy-loaded (map + three.js) to keep the shell small for low-bandwidth users.
+// Heavy routes are lazy-loaded (map + three.js + charts) to keep the shell small for low-bandwidth users.
 const Control = lazy(() => import('./pages/Control'));
 const Operator = lazy(() => import('./pages/Operator'));
 const Transporter = lazy(() => import('./pages/Transporter'));
@@ -17,6 +18,8 @@ const Owner = lazy(() => import('./pages/Owner'));
 const Warehouse = lazy(() => import('./pages/Warehouse'));
 const Admin = lazy(() => import('./pages/Admin'));
 const Twin = lazy(() => import('./pages/Twin'));
+const Registry = lazy(() => import('./pages/Registry'));
+const Model = lazy(() => import('./pages/Model'));
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const { session, loading } = useAuth();
@@ -33,7 +36,7 @@ function RequireRole({ roles, children }: { roles: Role[]; children: ReactNode }
     return (
       <div className="card mx-auto mt-10 max-w-lg p-6 text-center">
         <h1 className="text-lg font-semibold">Access restricted</h1>
-        <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">Your roles ({mine.join(', ') || 'none'}) do not include one of: {roles.join(', ')}.</p>
+        <p className="mt-2 text-sm text-ink-600 dark:text-slate-300">Your roles ({mine.join(', ') || 'none'}) do not include one of: {roles.join(', ')}.</p>
         <a className="btn-primary mt-4" href={homeFor(mine)}>Go to my dashboard</a>
       </div>
     );
@@ -50,6 +53,9 @@ function NotFound() {
   return <div className="card mx-auto mt-10 max-w-md p-6 text-center"><h1 className="text-lg font-semibold">Page not found</h1><a href="/" className="btn-secondary mt-4">Home</a></div>;
 }
 
+const REGISTRY_ROLES: Role[] = ['port_controller', 'weighbridge_operator', 'auditor', 'regulator_readonly'];
+const ANALYSIS_ROLES: Role[] = ['port_controller', 'auditor', 'regulator_readonly'];
+
 export default function App() {
   return (
     <AuthProvider>
@@ -57,6 +63,8 @@ export default function App() {
         <Suspense fallback={<div className="p-8"><Spinner label="Loading module" /></div>}>
           <Routes>
             <Route path="/login" element={<Login />} />
+            <Route path="/about" element={<About />} />
+            <Route path="/verify/token/:tokenRef" element={<Verify />} />
             <Route path="/verify/:qrToken" element={<Verify />} />
             <Route path="/verify" element={<Verify />} />
             <Route element={<RequireAuth><Shell /></RequireAuth>}>
@@ -67,6 +75,8 @@ export default function App() {
               <Route path="/driver" element={<RequireRole roles={['driver']}><Driver /></RequireRole>} />
               <Route path="/owner" element={<RequireRole roles={['cargo_owner']}><Owner /></RequireRole>} />
               <Route path="/warehouse" element={<RequireRole roles={['warehouse_manager']}><Warehouse /></RequireRole>} />
+              <Route path="/registry" element={<RequireRole roles={REGISTRY_ROLES}><Registry /></RequireRole>} />
+              <Route path="/model" element={<RequireRole roles={ANALYSIS_ROLES}><Model /></RequireRole>} />
               <Route path="/admin" element={<RequireRole roles={['platform_admin']}><Admin /></RequireRole>} />
               <Route path="/twin" element={<RequireRole roles={['port_controller', 'weighbridge_operator', 'auditor', 'regulator_readonly', 'transporter_admin', 'dispatcher']}><Twin /></RequireRole>} />
               <Route path="*" element={<NotFound />} />

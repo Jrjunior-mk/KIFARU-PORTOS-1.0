@@ -1,7 +1,7 @@
 from .auth import ORG_TYPES, ROLE_NAMES, Organization, RefreshSession, Role, User, UserPII, user_roles
 from .backhaul import MATCH_STATUSES, OFFER_STATUSES, BackhaulMatch, BackhaulOffer
 from .base import Base, utcnow
-from .fleet import Driver, DriverPII, Fleet, RfidTag, Trailer, Vehicle
+from .fleet import Driver, DriverPII, Fleet, RfidTag, SpecialLoadPermit, Trailer, Vehicle
 from .misc import ApiIntegration, AuditEvent, Incident, LedgerEvent, Notification
 from .queue import Appointment, QueueRecord
 from .shipments import (
@@ -14,11 +14,14 @@ from .shipments import (
     Shipment,
     Warehouse,
 )
-from .stations import SENSOR_KINDS, CalibrationRecord, Lane, Sensor, SensorReading, WeighingStation
-from .weighing import AxleMeasurement, ClearanceDecision, DigitalTicket, IdentityEvent, WeighingEvent
+from .stations import LANE_TYPES, NODE_KIND_BY_LANE_TYPE, SENSOR_KINDS, STATION_KINDS, CalibrationRecord, Lane, Sensor, SensorReading, WeighingStation
+from .weighing import AxleMeasurement, ClearanceDecision, DigitalTicket, IdentityEvent, LoadComplianceToken, ReleaseOrder, WeighingEvent
 
 __all__ = [
+    "LANE_TYPES",
     "MATCH_STATUSES",
+    "NODE_KIND_BY_LANE_TYPE",
+    "STATION_KINDS",
     "OFFER_STATUSES",
     "ORG_TYPES",
     "ROLE_NAMES",
@@ -46,15 +49,18 @@ __all__ = [
     "Incident",
     "Lane",
     "LedgerEvent",
+    "LoadComplianceToken",
     "Notification",
     "Organization",
     "QueueRecord",
     "RefreshSession",
+    "ReleaseOrder",
     "RfidTag",
     "Role",
     "Sensor",
     "SensorReading",
     "Shipment",
+    "SpecialLoadPermit",
     "Trailer",
     "User",
     "UserPII",
