@@ -189,7 +189,12 @@ function Truck({ t, station, positions, speed, leaderId, onDone }: { t: TwinTruc
   const st = useRef({ x: ROAD_START, z: ROAD_Z, phase: 'approach' as 'approach' | 'weighing' | 'to_park' | 'holding' | 'leaving' | 'done', timer: 0, weighed: false });
   useEffect(() => {
     positions.set(t.id, { x: ROAD_START, z: ROAD_Z, done: false });
-    return () => { positions.delete(t.id); };
+    return () => {
+      // keep the entry but mark it finished: the spawner and followers read it to decide when the road is clear
+      const p = positions.get(t.id);
+      if (p) p.done = true;
+      if (positions.size > 200) for (const [k, v] of positions) if (v.done) positions.delete(k);
+    };
   }, [t.id, positions]);
 
   useFrame((_, dtRaw) => {
@@ -254,14 +259,21 @@ function Truck({ t, station, positions, speed, leaderId, onDone }: { t: TwinTruc
 /** Releases queued trucks one at a time: the next truck enters only when the previous one has cleared the headway. */
 function Spawner({ queue, lastSpawnedId, positions, onSpawn }: { queue: TwinTruck[]; lastSpawnedId: string | null; positions: Positions; onSpawn: () => void }) {
   const cooldown = useRef(0);
+  const waiting = useRef(0); // seconds spent waiting for the previous truck to register its position
   useFrame((_, dt) => {
     cooldown.current -= dt;
     if (!queue.length || cooldown.current > 0) return;
     if (lastSpawnedId) {
       const p = positions.get(lastSpawnedId);
-      if (p === undefined) return; // previous truck not mounted yet
-      if (!p.done && p.x - ROAD_START < HEADWAY) return;
+      if (p === undefined) {
+        // previous truck not mounted yet; never wait more than a second so the queue can never stall
+        waiting.current += dt;
+        if (waiting.current < 1) return;
+      } else if (!p.done && p.x - ROAD_START < HEADWAY) {
+        return;
+      }
     }
+    waiting.current = 0;
     cooldown.current = 0.3;
     onSpawn();
   });

@@ -21,7 +21,14 @@ export default function Twin() {
   const [inScene, setInScene] = useState(0);
   const [speed, setSpeed] = useState(1);
   const stations = stationsQ.data ?? [];
-  const twinStations = useMemo<TwinStation[]>(() => stations.slice(0, 2).map((s, i) => ({ id: s.id, code: s.code, name: s.name, status: s.status, queue_len: s.queue_len, x: i, laneIds: s.lanes.map((l) => l.id), hasLane: s.lanes.some((l) => l.type === 'rolling_verification' && l.status !== 'offline') })), [stations]);
+  // Show the two busiest road stations (the ones with high-speed WIM lanes, e.g. Mariakani and Athi River), not the
+  // port gate or origin scales; passes at other stations are drawn at the first one.
+  const sceneStations = useMemo(() => {
+    const road = stations.filter((s) => (s.kind ?? 'road_station') === 'road_station' && s.lanes.some((l) => l.type.startsWith('wim')));
+    const pick = (road.length ? road : stations).slice().sort((a, b) => b.capacity_per_hour - a.capacity_per_hour);
+    return pick.slice(0, 2);
+  }, [stations]);
+  const twinStations = useMemo<TwinStation[]>(() => sceneStations.map((s, i) => ({ id: s.id, code: s.code, name: s.name, status: s.status, queue_len: s.queue_len, x: i, laneIds: s.lanes.map((l) => l.id), hasLane: s.lanes.some((l) => l.type === 'rolling_verification' && l.status !== 'offline') })), [sceneStations]);
   const stationIdx = useCallback((stationId: string | null, laneId?: string | null) => {
     let i = twinStations.findIndex((s) => s.id === stationId);
     if (i < 0 && laneId) i = twinStations.findIndex((s) => s.laneIds.includes(laneId));
@@ -34,7 +41,7 @@ export default function Twin() {
     if (ev.type === 'clearance.decided') {
       // one entry per decided pass, in the order decisions arrive; the scene releases them one at a time
       const route = (ROUTES as string[]).includes(p.route ?? '') ? (p.route as TwinRoute) : p.decision === 'GREEN' ? 'continue' : p.decision === 'RED' ? 'hold' : 'verification_lane';
-      setQueue((q) => (q.some((t) => t.id === ev.event_id) ? q : [...q.slice(-120), { id: ev.event_id, laneId: p.lane_id ?? null, stationIdx: stationsRef.current(ev.station_id, p.lane_id), decision: p.decision ?? null, route, plate: p.plate ?? null, spawnedAt: Date.now(), source: eventSource(ev) }]));
+      setQueue((q) => (q.some((t) => t.id === ev.event_id) ? q : [...q.slice(-59), { id: ev.event_id, laneId: p.lane_id ?? null, stationIdx: stationsRef.current(ev.station_id, p.lane_id), decision: p.decision ?? null, route, plate: p.plate ?? null, spawnedAt: Date.now(), source: eventSource(ev) }]));
     } else if (ev.type === 'queue.updated' || ev.type === 'station.failure') { void stationsQ.refetch(); if (ev.type === 'station.failure') void incidentsQ.refetch(); }
     else if (ev.type === 'incident.opened') void incidentsQ.refetch();
     // eslint-disable-next-line react-hooks/exhaustive-deps
