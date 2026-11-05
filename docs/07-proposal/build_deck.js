@@ -38,15 +38,22 @@ pres.defineSlideMaster({
   title: "DARK",
   background: { color: HEX.dk1 },
   objects: [
-    { placeholder: { options: { name: "title", type: "title", x: 0.6, y: 1.45, w: 8.8, h: 1.4, fontSize: 36, bold: true, color: C.background1, valign: "bottom", margin: 0 } } },
+    { placeholder: { options: { name: "title", type: "title", x: 0.6, y: 1.45, w: 8.8, h: 1.4, fontSize: 36, bold: true, color: C.background1, valign: "bottom", align: "left", margin: 0 } } },
     { placeholder: { options: { name: "body", type: "body", x: 0.6, y: 2.95, w: 8.8, h: 1.2, fontSize: 18, color: "CBD5E1", valign: "top", margin: 0 } } },
+  ],
+});
+pres.defineSlideMaster({
+  title: "CLOSING",
+  background: { color: HEX.dk1 },
+  objects: [
+    { placeholder: { options: { name: "title", type: "title", x: 0.6, y: 1.1, w: 8.8, h: 0.9, fontSize: 36, bold: true, color: C.background1, valign: "bottom", align: "left", margin: 0 } } },
   ],
 });
 pres.defineSlideMaster({
   title: "CONTENT",
   background: { color: HEX.lt1 },
   objects: [
-    { placeholder: { options: { name: "title", type: "title", x: 0.5, y: 0.28, w: 9.0, h: 0.9, fontSize: 24, bold: true, color: C.text1, valign: "middle", margin: 0 } } },
+    { placeholder: { options: { name: "title", type: "title", x: 0.5, y: 0.28, w: 9.0, h: 0.9, fontSize: 24, bold: true, color: C.text1, valign: "middle", align: "left", margin: 0 } } },
     { text: { text: FOOTER, options: { x: 0.5, y: 5.22, w: 8.0, h: 0.25, fontSize: 8, color: C.accent6, margin: 0 } } },
   ],
   slideNumber: { x: 9.0, y: 5.22, w: 0.5, h: 0.25, fontSize: 8, color: HEX.accent6, align: "right" },
@@ -66,7 +73,7 @@ function stat(slide, x, y, w, value, label, color = C.accent1, vsize = 36) {
   txt(slide, label, { x, y: y + 0.78, w, h: 0.66, fontSize: 11, color: C.accent6, objectName: "stat label " + label });
 }
 function bullets(slide, items, o) {
-  slide.addText(items.map((t, i) => ({ text: t, options: { bullet: true, breakLine: i < items.length - 1, paraSpaceAfter: 6 } })), { isTextBox: true, margin: 0, fontSize: 13, color: C.text2, valign: "top", ...o });
+  slide.addText(items.map((t, i) => ({ text: t, options: { bullet: { indent: 13 }, breakLine: i < items.length - 1, paraSpaceAfter: 6 } })), { isTextBox: true, margin: 0, fontSize: 13, color: C.text2, valign: "top", ...o });
 }
 const chartText = { catAxisLabelColor: HEX.dk2, valAxisLabelColor: HEX.dk2, catAxisLabelFontSize: 10, valAxisLabelFontSize: 10, catAxisLabelFontFace: "+mn-lt", valAxisLabelFontFace: "+mn-lt", dataLabelFontFace: "+mn-lt", dataLabelFontSize: 9, dataLabelColor: HEX.dk2, legendFontFace: "+mn-lt", legendFontSize: 10, legendColor: HEX.dk2, valGridLine: { color: "E2E8F0", size: 0.5 }, catGridLine: { style: "none" }, titleFontFace: "+mj-lt", titleFontSize: 12, titleColor: HEX.dk1 };
 const f1 = (v) => Number(v).toFixed(1);
@@ -94,14 +101,14 @@ const probs = [
 ];
 probs.forEach(([n, h, b], i) => {
   const x = 0.5 + i * 3.1;
-  card(s, x, 1.3, 2.9, 2.55, { name: "problem card " + n });
+  card(s, x, 1.3, 2.9, 2.4, { name: "problem card " + n });
   badge(s, x + 0.2, 1.5, n, HEX.accent1);
   txt(s, h, { x: x + 0.2, y: 2.05, w: 2.5, h: 0.5, fontSize: 14, bold: true, color: C.text1, objectName: "problem head " + n });
-  txt(s, b, { x: x + 0.2, y: 2.55, w: 2.5, h: 1.25, fontSize: 11.5, objectName: "problem body " + n });
+  txt(s, b, { x: x + 0.2, y: 2.5, w: 2.5, h: 1.15, fontSize: 11.5, objectName: "problem body " + n });
 });
-stat(s, 0.5, 4.05, 2.9, f1(pt[85].road_only_static) + " %", "of port trucks sent to a static scale at 85 % average loading under road-only screening (modelled)", C.accent3);
-stat(s, 3.6, 4.05, 2.9, "8 000", "trucks a day at Mariakani; one percentage point of stops is 8 truck-hours a day");
-stat(s, 6.7, 4.05, 2.8, "2 990 USD", "indicative fee for 5 000 kg over the gross limit, tripled on a repeat in the same journey", C.accent2);
+stat(s, 0.5, 3.8, 2.9, f1(pt[85].road_only_static) + " %", "of port trucks sent to a static scale at 85 % loading, road-only screening (modelled)", C.accent3);
+stat(s, 3.6, 3.8, 2.9, "8 000", "trucks a day at Mariakani; one percentage point of stops is 8 truck-hours a day");
+stat(s, 6.7, 3.8, 2.8, "2 990 USD", "indicative fee for 5 000 kg over the gross limit, tripled on a repeat in the same journey", C.accent2);
 s.addNotes("The gap: the port chain verifies everything except weight, and the road weighs everything again. Numbers are from the chain model and the 2018 Regulations fee table, both to be confirmed.");
 
 // ================================================================== 3 the idea
@@ -190,12 +197,14 @@ const rules = [
 ];
 rules.forEach(([tag, head, col, items], i) => {
   const x = 0.5 + i * 3.1;
-  card(s, x, 1.3, 2.9, 3.75, { name: "rule card " + tag });
+  card(s, x, 1.3, 2.9, 2.75, { name: "rule card " + tag });
   s.addShape(pres.ShapeType.roundRect, { x: x + 0.2, y: 1.5, w: 0.95, h: 0.38, fill: { color: col }, line: { color: col }, rectRadius: 0.06, objectName: "rule tag " + tag });
   s.addText(tag, { x: x + 0.2, y: 1.5, w: 0.95, h: 0.38, isTextBox: true, margin: 0, align: "center", valign: "middle", fontSize: 12, bold: true, color: C.background1, objectName: "rule tag text " + tag });
   txt(s, head, { x: x + 1.25, y: 1.5, w: 1.55, h: 0.38, fontSize: 12.5, bold: true, color: C.text1, valign: "middle", objectName: "rule head " + tag });
-  bullets(s, items, { x: x + 0.2, y: 2.05, w: 2.5, h: 2.9, fontSize: 11 });
+  bullets(s, items, { x: x + 0.2, y: 2.05, w: 2.5, h: 1.95, fontSize: 11 });
 });
+card(s, 0.5, 4.25, 9.0, 0.8, { fill: C.text1, name: "rule takeaway" });
+txt(s, "For a tokened truck the road no longer judges weight against the limit: it only confirms the weight is unchanged since the first trusted weighing.", { x: 0.75, y: 4.25, w: 8.5, h: 0.8, fontSize: 13, bold: true, color: C.background1, valign: "middle", objectName: "rule takeaway text" });
 s.addNotes("For loads in the margin band the road reading no longer has to be accurate against the limit; it only has to confirm the weight is unchanged since the first trusted weighing.");
 
 // ================================================================== 8 legal
@@ -266,7 +275,7 @@ s.addChart(pres.ChartType.line, [
   { name: "First station: verification lane", labels: covs, values: chain.mixed_table.map((r) => +f1(r.first_station_lane)) },
   { name: "First station: static scale", labels: covs, values: chain.mixed_table.map((r) => +f1(r.first_station_static)) },
   { name: "Later stations: lane", labels: covs, values: chain.mixed_table.map((r) => +f1(r.later_station_lane)) },
-], { x: 0.5, y: 1.2, w: 6.1, h: 3.9, chartColors: [HEX.accent6, HEX.accent2, HEX.accent3, HEX.accent1], lineSize: 2.5, lineDataSymbol: "circle", lineDataSymbolSize: 7, showValue: true, dataLabelPosition: "t", dataLabelFormatCode: "0.0", showLegend: true, legendPos: "b", showTitle: true, title: "Share of all trucks (%) at 85 % loading by share carrying a port or origin token (modelled)", valAxisMaxVal: 25, ...chartText });
+], { x: 0.5, y: 1.2, w: 6.1, h: 3.9, chartColors: [HEX.accent6, HEX.accent2, HEX.accent3, HEX.accent1], lineSize: 2.5, lineDataSymbol: "circle", lineDataSymbolSize: 7, showValue: false, showLegend: true, legendPos: "b", showTitle: true, title: "Share of all trucks (%) at 85 % loading by share carrying a port or origin token (modelled)", valAxisMaxVal: 25, ...chartText });
 stat(s, 6.9, 1.25, 2.6, f1(mx[30].first_station_static) + " % to " + f1(mx[90].first_station_static) + " %", "first-station static visits as coverage rises from 30 % to 90 % (baseline " + f1(mx[90].road_only_baseline_static) + " %)", C.accent3, 26);
 stat(s, 6.9, 2.75, 2.6, Number(mx[90].later_station_static).toFixed(2) + " %", "static visits at later stations once every truck carries a token: repeat stops disappear", C.accent1);
 txt(s, "Lane capacity: modelled peak " + Math.round(d.lane_peak_per_hour) + " trucks an hour against about " + Math.round(d.lane_capacity_per_hour) + " per lane, so one lane per station is enough. Fleet and loader enrolment is therefore a core workstream.", { x: 6.9, y: 4.15, w: 2.6, h: 1.0, fontSize: 9.5, color: C.accent6, objectName: "lane capacity note" });
@@ -280,14 +289,20 @@ s.addChart(pres.ChartType.bar, [{ name: "Swing of the road stop share (points)",
   { x: 0.5, y: 1.2, w: 5.4, h: 3.9, barDir: "bar", chartColors: [HEX.accent1], showValue: true, dataLabelPosition: "outEnd", dataLabelFormatCode: "0.0", showLegend: false, showTitle: true, title: "Swing of RCS v2 road stops across each factor's low-high range (points, modelled)", ...chartText });
 card(s, 6.2, 1.2, 3.3, 3.9, { name: "gate card" });
 txt(s, "Go/no-go gate (Section 10.9)", { x: 6.4, y: 1.35, w: 3.0, h: 0.4, fontSize: 14, bold: true, color: C.text1, objectName: "gate head" });
+const GATE = {
+  road_stop_share_cut_points: ["Road stop share cut by 10+ points", (c) => f1(c.value) + " points"],
+  false_clear_rate: ["False-clear rate at most 1 %", (c) => (c.value * 100).toFixed(2) + " %"],
+  port_reweigh_share_pct: ["Port re-weigh practical (at most 20 %)", (c) => f1(c.value) + " %"],
+  lane_capacity: ["Lane peak within capacity", (c) => Math.round(c.value) + " of " + Math.round(c.threshold) + " trucks/h"],
+};
 chain.gate.checks.forEach((c, i) => {
-  const y = 1.85 + i * 0.78;
-  badge(s, 6.4, y, c.ok ? "ok" : "x", c.ok ? HEX.accent4 : HEX.accent3, 0.38);
-  const label = { road_stop_share_cut_points: "Road stop share cut by at least 10 points", false_clear_rate: "False-clear rate at most 1 %", port_reweigh_share_pct: "Port re-weigh volume practical (at most 20 %)" }[c.name] || c.name;
-  txt(s, label, { x: 6.9, y: y - 0.02, w: 2.5, h: 0.4, fontSize: 11, bold: true, color: C.text1, objectName: "gate label " + i });
-  txt(s, "value " + f1(c.name === "false_clear_rate" ? c.value * 100 : c.value) + (c.name === "false_clear_rate" ? " %" : c.name.includes("points") ? " points" : " %"), { x: 6.9, y: y + 0.36, w: 2.5, h: 0.3, fontSize: 10, color: C.accent6, objectName: "gate value " + i });
+  const y = 1.8 + i * 0.62;
+  const [label, val] = GATE[c.name] || [c.name, (x) => f1(x.value)];
+  badge(s, 6.4, y + 0.04, c.ok ? "ok" : "x", c.ok ? HEX.accent4 : HEX.accent3, 0.36);
+  txt(s, label, { x: 6.9, y, w: 2.5, h: 0.28, fontSize: 11, bold: true, color: C.text1, objectName: "gate label " + i });
+  txt(s, val(c), { x: 6.9, y: y + 0.27, w: 2.5, h: 0.25, fontSize: 10, color: C.accent6, objectName: "gate value " + i });
 });
-txt(s, (chain.gate.proceed ? "Met in the model. " : "Not met. ") + "Re-applied to the validated model on measured baseline data before any hardware spend; 30 replications give confidence intervals under 0.1 point, so the uncertainty that matters is in the assumptions.", { x: 6.4, y: 4.2, w: 3.0, h: 0.85, fontSize: 9.5, color: C.accent6, objectName: "gate note" });
+txt(s, (chain.gate.proceed ? "All checks met in the model. " : "Not met. ") + "The gate is re-applied to the validated model on measured baseline data before any hardware spend.", { x: 6.4, y: 4.35, w: 3.0, h: 0.65, fontSize: 9.5, color: C.accent6, objectName: "gate note" });
 s.addNotes("Token coverage swings the road stop share by about 10 points; audit rate about 4; loading about 2.6. Port error and the allowance move the port re-weigh share instead.");
 
 // ================================================================== 13 station queue model
@@ -300,7 +315,7 @@ const pretty = { baseline_all_stop: "All stop (today)", rolling_clearance: "Roll
 s.addChart(pres.ChartType.bar, [
   { name: "Stopped at the static scale", labels: names.map((n) => pretty[n]), values: names.map((n) => +f1(o[n].summary.pct_stopped.mean)) },
   { name: "Rolled through the verification lane", labels: names.map((n) => pretty[n]), values: names.map((n) => +f1(o[n].summary.pct_lane.mean)) },
-], { x: 0.5, y: 1.2, w: 6.1, h: 3.9, barDir: "col", barGrouping: "clustered", chartColors: [HEX.accent3, HEX.accent2], showValue: true, dataLabelPosition: "outEnd", dataLabelFormatCode: "0", showLegend: true, legendPos: "b", showTitle: true, title: "Share of trucks (%), SimPy station model, 12 h, 3 replications (modelled)", valAxisMaxVal: 110, catAxisLabelFontSize: 8, ...chartText, catAxisLabelFontSize: 8 });
+], { x: 0.5, y: 1.2, w: 6.1, h: 3.9, barDir: "col", barGrouping: "clustered", chartColors: [HEX.accent3, HEX.accent2], showValue: true, dataLabelPosition: "outEnd", dataLabelFormatCode: "0", showLegend: true, legendPos: "b", showTitle: true, title: "Share of trucks (%), SimPy station model, 12 h, 3 replications (modelled)", valAxisMaxVal: 110, valAxisMinVal: 0, ...chartText, catAxisLabelFontSize: 8 });
 const tis = (n) => f1(o[n].summary.mean_tis_min.mean);
 stat(s, 6.9, 1.25, 2.6, tis("baseline_all_stop") + " min", "mean time in system when every truck stops (static scale saturated)", C.accent3, 30);
 stat(s, 6.9, 2.7, 2.6, tis("rcs_v2_tokens_90") + " min", "with RCS v2 at 90 % token coverage; static utilisation " + Math.round(o.rcs_v2_tokens_90.summary.static_utilisation_pct.mean) + " %", C.accent1, 30);
@@ -325,10 +340,10 @@ phases.forEach(([n, h, when, what, gate], i) => {
   if (i < 4) s.addShape(pres.ShapeType.rightArrow, { x: x + 1.7, y: 1.47, w: 0.14, h: 0.22, fill: { color: HEX.accent6 }, line: { color: HEX.accent6 }, objectName: "arrow " + n });
   txt(s, h, { x, y: 1.95, w: 1.7, h: 0.4, fontSize: 12.5, bold: true, color: C.text1, objectName: "phase head " + n });
   txt(s, when, { x, y: 2.3, w: 1.7, h: 0.3, fontSize: 10, italic: true, color: C.accent6, objectName: "phase when " + n });
-  txt(s, what, { x, y: 2.62, w: 1.7, h: 1.35, fontSize: 10, objectName: "phase what " + n });
-  card(s, x, 4.05, 1.7, 1.0, { name: "phase gate " + n });
-  txt(s, "Exit gate", { x: x + 0.12, y: 4.1, w: 1.5, h: 0.25, fontSize: 8.5, bold: true, color: C.accent1, objectName: "phase gate head " + n });
-  txt(s, gate, { x: x + 0.12, y: 4.35, w: 1.5, h: 0.68, fontSize: 9.5, color: C.text1, objectName: "phase gate text " + n });
+  txt(s, what, { x, y: 2.62, w: 1.7, h: 1.15, fontSize: 10, objectName: "phase what " + n });
+  card(s, x, 3.85, 1.7, 1.2, { name: "phase gate " + n });
+  txt(s, "Exit gate", { x: x + 0.12, y: 3.95, w: 1.5, h: 0.25, fontSize: 8.5, bold: true, color: C.accent1, objectName: "phase gate head " + n });
+  txt(s, gate, { x: x + 0.12, y: 4.22, w: 1.5, h: 0.78, fontSize: 9.5, color: C.text1, objectName: "phase gate text " + n });
 });
 s.addNotes("The 16-week simulation sits inside Phase 2: weeks 1-2 baseline plan and data requests, 3-4 sensor model, 5-8 process model, 9-10 road traffic, 11-14 token service and hardware-in-the-loop, 15-16 validation and committee report.");
 
@@ -355,15 +370,16 @@ s.addNotes("Also: legitimate weight changes (partial offloads, fuel) handled wit
 
 // ================================================================== 16 decisions
 pres.addSection({ title: "Closing" });
-s = pres.addSlide({ masterName: "DARK", sectionTitle: "Closing" });
+s = pres.addSlide({ masterName: "CLOSING", sectionTitle: "Closing" });
 s.addText("Decisions requested", { placeholder: "title" });
+txt(s, "NEXT STEPS", { x: 0.6, y: 0.7, w: 8.8, h: 0.5, fontSize: 16, bold: true, color: C.accent1, charSpacing: 4, objectName: "eyebrow" });
 const asks = ["Approve the redesign around the port gate-out node and the Load Compliance Token", "Approve Phases 0-2: simulation and baseline study, gated before hardware spend", "Authorise approaches to KPA, KRA, KeNHA, NTSA and the weights-and-measures body", "Nominate an executive sponsor and a legal adviser"];
 asks.forEach((t, i) => {
-  const y = 2.95 + i * 0.52;
-  badge(s, 0.6, y, String(i + 1), HEX.accent1, 0.38);
-  txt(s, t, { x: 1.15, y, w: 8.2, h: 0.38, fontSize: 13, color: C.background1, valign: "middle", objectName: "ask " + (i + 1) });
+  const y = 2.4 + i * 0.62;
+  badge(s, 0.6, y, String(i + 1), HEX.accent1, 0.42);
+  txt(s, t, { x: 1.2, y, w: 8.2, h: 0.42, fontSize: 15, color: C.background1, valign: "middle", objectName: "ask " + (i + 1) });
 });
-txt(s, "Full proposal: docs/07-proposal/KIFARU-PORTOS-Project-Proposal.pdf  |  " + LIVE, { x: 0.6, y: 5.0, w: 8.8, h: 0.3, fontSize: 10, color: "94A3B8", objectName: "closing link" });
+txt(s, "Full proposal: docs/07-proposal/KIFARU-PORTOS-Project-Proposal.pdf  |  " + LIVE, { x: 0.6, y: 4.95, w: 8.8, h: 0.3, fontSize: 11, color: "94A3B8", objectName: "closing link" });
 s.addNotes("Close on the four decisions. Everything modelled is labelled modelled; the first spend is the baseline study and the legal opinion, not hardware.");
 
 (async () => {
