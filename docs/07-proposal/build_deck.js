@@ -10,9 +10,10 @@ const { applyTheme } = require(process.env.PPTX_SKILL_DIR + "/scripts/apply_them
 
 const HERE = __dirname;
 const A = path.join(HERE, "assets");
-const OUT = path.join(HERE, "KIFARU-PORTOS-Proposal-Deck.pptx");
+const OUT = path.join(HERE, "KIFARU-PORTOS-Judges-Deck.pptx");
 const chain = JSON.parse(fs.readFileSync(path.join(A, "chain-results.json"), "utf8"));
 const simpy = JSON.parse(fs.readFileSync(path.join(A, "simpy-comparison.json"), "utf8"));
+const port = JSON.parse(fs.readFileSync(path.join(A, "port-results.json"), "utf8"));
 const LIVE = "kifaru-portos-1-0.vercel.app";
 
 const THEME = {
@@ -31,7 +32,7 @@ pres.author = "KIFARU PORTOS project team";
 pres.subject = "Project proposal deck";
 const C = pres.SchemeColor;
 
-const FOOTER = "KIFARU PORTOS  |  RCS v2 port-anchored clearance  |  simulation figures are modelled, not measured";
+const FOOTER = "KIFARU PORTOS  |  RCS v2 + SmartPort  |  modelled figures are labelled; published figures are cited";
 
 // ------------------------------------------------------------------ layouts
 pres.defineSlideMaster({
@@ -86,9 +87,27 @@ pres.addSection({ title: "Opening" });
 let s = pres.addSlide({ masterName: "DARK", sectionTitle: "Opening" });
 txt(s, "KIFARU PORTOS", { x: 0.6, y: 0.7, w: 8.8, h: 0.5, fontSize: 16, bold: true, color: C.accent1, charSpacing: 4, objectName: "brand" });
 s.addText("Weigh once. Honour it everywhere.", { placeholder: "title" });
-s.addText("RCS v2 port-anchored clearance for heavy trucks on the Mombasa - Northern Corridor route\nProject proposal  |  5 November 2026", { placeholder: "body" });
+s.addText("RCS v2 port-anchored clearance for heavy trucks on the Mombasa - Northern Corridor route\nProposal to the judging panel  |  5 November 2026", { placeholder: "body" });
 txt(s, "Live platform: " + LIVE, { x: 0.6, y: 4.7, w: 8.8, h: 0.3, fontSize: 11, color: "94A3B8", objectName: "live link" });
 s.addNotes("Open with the one-line idea: every heavy truck is weighed once at its first trusted point and later weighbridges honour a signed token instead of weighing again. The platform already exists and is live.");
+
+// ================================================================== 1b at a glance (judges)
+s = pres.addSlide({ masterName: "CONTENT", sectionTitle: "Opening" });
+s.addText("The project in one minute", { placeholder: "title" });
+const glance = [
+  ["Problem", "Almost every truck is compliant, yet every truck is weighed again at every station; port dwell and corridor transit run far above target.", HEX.accent3],
+  ["Innovation", "Weigh once at the first trusted point, honour a signed token downstream, and roll doubtful trucks through a lane instead of stopping them.", HEX.accent1],
+  ["Proof it works", "Built, tested with 177 automated tests and live on a hosted database, with every agency workflow from port gate to delivery.", HEX.accent5],
+  ["Impact (modelled)", "Port-truck road stops 23.2 % to 5.3 %; port dwell 6.8 h to 4.0 h; about 143 truck-hours a day freed at one station.", HEX.accent4],
+];
+glance.forEach(([h, b, col], i) => {
+  const x = 0.5 + (i % 2) * 4.6, y = 1.3 + Math.floor(i / 2) * 1.9;
+  card(s, x, y, 4.4, 1.7, { name: "glance card " + i });
+  s.addShape(pres.ShapeType.ellipse, { x: x + 0.22, y: y + 0.24, w: 0.32, h: 0.32, fill: { color: col }, line: { color: col }, objectName: "glance dot " + i });
+  txt(s, h, { x: x + 0.7, y: y + 0.18, w: 3.5, h: 0.45, fontSize: 15, bold: true, color: C.text1, valign: "middle", objectName: "glance head " + i });
+  txt(s, b, { x: x + 0.22, y: y + 0.72, w: 3.95, h: 0.9, fontSize: 12, objectName: "glance body " + i });
+});
+s.addNotes("Give the judges the whole case in four sentences before the detail: the problem, the idea, the fact that it is already built and live, and the modelled impact.");
 
 // ================================================================== 2 the problem
 pres.addSection({ title: "The case" });
@@ -110,6 +129,16 @@ stat(s, 0.5, 3.8, 2.9, f1(pt[85].road_only_static) + " %", "of port trucks sent 
 stat(s, 3.6, 3.8, 2.9, "8 000", "trucks a day at Mariakani; one percentage point of stops is 8 truck-hours a day");
 stat(s, 6.7, 3.8, 2.8, "2 990 USD", "indicative fee for 5 000 kg over the gross limit, tripled on a repeat in the same journey", C.accent2);
 s.addNotes("The gap: the port chain verifies everything except weight, and the road weighs everything again. Numbers are from the chain model and the 2018 Regulations fee table, both to be confirmed.");
+
+// ================================================================== 2b evidence (published data)
+s = pres.addSlide({ masterName: "CONTENT", sectionTitle: "The case" });
+s.addText("What the published data shows", { placeholder: "title" });
+s.addImage({ path: path.join(A, "fig-evidence-mariakani.png"), x: 0.5, y: 1.25, w: 5.9, h: 2.53, objectName: "Mariakani traffic chart" });
+txt(s, "Mariakani weighed 7,954-9,184 trucks a day in Jul-Sep 2026, over three times a year earlier, and 99 % of them were compliant. Source: KeNHA via NCTTCA quarterly report, Oct 2026.", { x: 0.5, y: 3.95, w: 5.9, h: 0.9, fontSize: 11, color: C.accent6, objectName: "evidence caption" });
+stat(s, 6.8, 1.2, 2.7, "87 h", "import container dwell at Mombasa, Jul-Sep 2026 (target 60 h)", C.accent3, 30);
+stat(s, 6.8, 2.55, 2.7, "66 h", "Mombasa to Nairobi transit for 482 km in 2025 (target 29 h)", C.accent2, 30);
+stat(s, 6.8, 3.9, 2.7, "6.7 h", "average truck turnaround inside the port, KPA 2023", C.accent1, 30);
+s.addNotes("These are published figures, not model outputs: NCTTCA Transport Observatory (21st edition and the July-September 2026 quarterly), KeNHA, and KPA's annual bulletin. Compliance is already near 99 %, so the waste is in re-checking compliant trucks.");
 
 // ================================================================== 3 the idea
 s = pres.addSlide({ masterName: "CONTENT", sectionTitle: "The case" });
@@ -207,6 +236,27 @@ card(s, 0.5, 4.25, 9.0, 0.8, { fill: C.text1, name: "rule takeaway" });
 txt(s, "For a tokened truck the road no longer judges weight against the limit: it only confirms the weight is unchanged since the first trusted weighing.", { x: 0.75, y: 4.25, w: 8.5, h: 0.8, fontSize: 13, bold: true, color: C.background1, valign: "middle", objectName: "rule takeaway text" });
 s.addNotes("For loads in the margin band the road reading no longer has to be accurate against the limit; it only has to confirm the weight is unchanged since the first trusted weighing.");
 
+// ================================================================== 7b SmartPort eleven stages
+s = pres.addSlide({ masterName: "CONTENT", sectionTitle: "The design" });
+s.addText("SmartPort: one record per truck, booking to delivery", { placeholder: "title" });
+const stages = [
+  ["Pre-arrival booking", "Transporter"], ["Customs and permits", "KRA, KenTrade, KEBS"], ["Arrival and ID", "KPA"], ["Gate-in", "KPA"],
+  ["Yard allocation", "KPA"], ["Verification and loading", "KPA"], ["Automated weighing", "KPA, KeNHA"], ["Final clearance", "KPA, KRA"],
+  ["Gate-out", "KPA"], ["Inland transport", "Transporter, KeNHA"], ["Delivery", "Cargo owner"],
+];
+stages.forEach(([h, who], i) => {
+  const row = i < 6 ? 0 : 1, col = i < 6 ? i : i - 6;
+  const x = 0.5 + col * 1.5 + (row ? 0.75 : 0), y = 1.3 + row * 1.45;
+  const hi = i === 6;
+  s.addShape(pres.ShapeType.roundRect, { x, y, w: 1.38, h: 1.25, fill: { color: hi ? HEX.accent1 : HEX.lt2 }, line: { color: hi ? HEX.accent1 : HEX.lt2 }, rectRadius: 0.08, objectName: "stage " + (i + 1) });
+  txt(s, String(i + 1), { x: x + 0.12, y: y + 0.1, w: 0.5, h: 0.3, fontSize: 13, bold: true, color: hi ? C.background1 : C.accent1, objectName: "stage num " + (i + 1) });
+  txt(s, h, { x: x + 0.12, y: y + 0.4, w: 1.16, h: 0.48, fontSize: 10.5, bold: true, color: hi ? C.background1 : C.text1, objectName: "stage name " + (i + 1) });
+  txt(s, who, { x: x + 0.12, y: y + 0.9, w: 1.16, h: 0.3, fontSize: 8.5, color: hi ? C.background1 : C.accent6, objectName: "stage owner " + (i + 1) });
+});
+card(s, 0.5, 4.3, 9.0, 0.75, { fill: C.text1, name: "smartport takeaway" });
+txt(s, "Stage 7 is the port gate-out weigh node: the weighing fills the record and issues the token automatically. Each stage must carry its required data before the next opens.", { x: 0.75, y: 4.3, w: 8.5, h: 0.75, fontSize: 12, bold: true, color: C.background1, valign: "middle", objectName: "smartport takeaway text" });
+s.addNotes("This is the port-side layer from the SmartPort design. Agencies keep their own systems; SmartPort shares release, weighing and location status through authorised adapters and one dashboard.");
+
 // ================================================================== 8 legal
 s = pres.addSlide({ masterName: "CONTENT", sectionTitle: "The design" });
 s.addText("Anchored in the 2018 Enforcement Regulations", { placeholder: "title" });
@@ -247,7 +297,7 @@ built.forEach(([h, b, col], i) => {
   txt(s, b, { x: x + 0.45, y: y + 0.35, w: 4.0, h: 0.6, fontSize: 10, objectName: "built body " + i });
 });
 card(s, 0.5, 4.35, 9.0, 0.7, { fill: C.text1, name: "live bar" });
-txt(s, "164 automated tests passing  |  live at " + LIVE + "  |  every record carries live / simulated / replay and simulated data is never shown as live", { x: 0.7, y: 4.35, w: 8.6, h: 0.7, fontSize: 12, bold: true, color: C.background1, valign: "middle", objectName: "live line" });
+txt(s, "177 automated tests passing  |  live at " + LIVE + "  |  every record carries live / simulated / replay and simulated data is never shown as live", { x: 0.7, y: 4.35, w: 8.6, h: 0.7, fontSize: 12, bold: true, color: C.background1, valign: "middle", objectName: "live line" });
 s.addNotes("78 API tests, 32 simulation, 22 gateway, 24 DSP, 8 agents. Hardware is designed, not built; regulators have not reviewed the design. These are stated plainly in the proposal.");
 
 // ================================================================== 10 modelled effect: port trucks (native chart)
@@ -321,6 +371,20 @@ stat(s, 6.9, 1.25, 2.6, tis("baseline_all_stop") + " min", "mean time in system 
 stat(s, 6.9, 2.7, 2.6, tis("rcs_v2_tokens_90") + " min", "with RCS v2 at 90 % token coverage; static utilisation " + Math.round(o.rcs_v2_tokens_90.summary.static_utilisation_pct.mean) + " %", C.accent1, 30);
 txt(s, "The station model uses a heavier synthetic population (15 % overloaded) than the chain model, so shares differ; it is used for queues, lane capacity and closures. A two-hour lane closure sends doubtful trucks back to the static scale, as designed.", { x: 6.9, y: 4.0, w: 2.6, h: 1.2, fontSize: 9.5, color: C.accent6, objectName: "simpy note" });
 s.addNotes("Decisions in the station model come from the production clearance engine, so the simulation and the live platform cannot disagree on policy.");
+
+// ================================================================== 13b port process results
+s = pres.addSlide({ masterName: "CONTENT", sectionTitle: "Modelled effect" });
+s.addText("Port visit: dwell falls by about 40 % with SmartPort", { placeholder: "title" });
+const pe = port.scenarios.existing, ps = port.scenarios.smartport;
+const pk = [["avg_dwell_h", "Mean dwell (h)"], ["p90_dwell_h", "P90 dwell (h)"], ["weigh_service_min", "Weighing (min)"]];
+s.addChart(pres.ChartType.bar, [
+  { name: "Existing operations", labels: pk.map((k) => k[1]), values: pk.map((k) => +f1(pe[k[0]])) },
+  { name: "SmartPort", labels: pk.map((k) => k[1]), values: pk.map((k) => +f1(ps[k[0]])) },
+], { x: 0.5, y: 1.2, w: 6.1, h: 3.9, barDir: "col", barGrouping: "clustered", chartColors: [HEX.accent6, HEX.accent1], showValue: true, dataLabelPosition: "outEnd", dataLabelFormatCode: "0.0", showLegend: true, legendPos: "b", showTitle: true, title: "Port visit KPIs, SimPy model, 5 replications (modelled)", valAxisMinVal: 0, ...chartText });
+stat(s, 6.9, 1.25, 2.6, f1(pe.avg_dwell_h) + " h to " + f1(ps.avg_dwell_h) + " h", "mean port dwell; the existing case is calibrated to KPA's published 6.7 h", C.accent1, 26);
+stat(s, 6.9, 2.7, 2.6, Math.round(port.deltas.weigh_service_min_pct) + " %", "weighbridge service time at the port gate-out node versus a static stop", C.accent4, 30);
+txt(s, "Assumed: RFID/ANPR gates (1 min vs 4), pre-cleared documents (5 % holds vs 15 %), appointments aligned with container readiness. To be measured in the shadow pilot.", { x: 6.9, y: 4.05, w: 2.6, h: 1.15, fontSize: 9.5, color: C.accent6, objectName: "port assumptions" });
+s.addNotes("The existing-operations case reproduces KPA's published 2023 truck turnaround, which anchors the model in real data. The SmartPort gains come from stated design assumptions, all listed in the proposal.");
 
 // ================================================================== 14 roadmap
 pres.addSection({ title: "Delivery" });

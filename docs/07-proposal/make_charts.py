@@ -148,3 +148,42 @@ arrow(50, 18, 61, 6, RED); ax.text(51.5, 9.5, "certain overload", fontsize=6.8, 
 ax.text(50, 38, "Weigh once at the first trusted point; later stations honour the Load Compliance Token", ha="center", fontsize=8.5, color=NAVY, weight="bold")
 save(fig, "fig-chain.png")
 print("charts written")
+
+
+# 9. SmartPort port-process comparison (modelled, calibrated to KPA 2023 truck turnaround)
+port = json.loads((A / "port-results.json").read_text(encoding="utf8"))
+pe, ps = port["scenarios"]["existing"], port["scenarios"]["smartport"]
+fig, ax = plt.subplots(figsize=(7, 3.0))
+labels = ["Mean port dwell (h)", "P90 port dwell (h)", "Weighbridge service (min)"]
+keys = ["avg_dwell_h", "p90_dwell_h", "weigh_service_min"]
+x = range(len(keys))
+b1 = ax.bar([i - 0.2 for i in x], [pe[k] for k in keys], width=0.4, color=GREY, label="Existing operations")
+b2 = ax.bar([i + 0.2 for i in x], [ps[k] for k in keys], width=0.4, color=TEAL, label="SmartPort")
+for bars in (b1, b2):
+    for b in bars:
+        ax.text(b.get_x() + b.get_width() / 2, b.get_height() + 0.15, f"{b.get_height():.1f}", ha="center", fontsize=8)
+ax.axhline(6.7, color=AMBER, lw=1, ls="--")
+ax.text(2.45, 6.85, "KPA 2023: 6.7 h", color=AMBER, fontsize=7.5, ha="right")
+ax.set_xticks(list(x)); ax.set_xticklabels(labels)
+ax.set_title("Port visit: existing operations vs SmartPort (SimPy, 5 replications, modelled)")
+ax.legend(fontsize=8)
+save(fig, "fig-port-sim.png")
+
+# 10. Real evidence: Mariakani daily weighed traffic, Jul-Sep 2025 vs 2026 (KeNHA via NCTTCA)
+months = ["July", "August", "September"]
+t25, t26 = [2695, 2501, 2720], [9066, 9184, 7954]
+c26 = [99.87, 99.23, 99.08]
+fig, ax = plt.subplots(figsize=(7, 3.0))
+b1 = ax.bar([i - 0.2 for i in range(3)], t25, width=0.4, color=GREY, label="2025")
+b2 = ax.bar([i + 0.2 for i in range(3)], t26, width=0.4, color=NAVY, label="2026")
+for bars in (b1, b2):
+    for b in bars:
+        ax.text(b.get_x() + b.get_width() / 2, b.get_height() + 120, f"{int(b.get_height()):,}", ha="center", fontsize=8)
+for i, c in enumerate(c26):
+    ax.text(i + 0.2, 400, f"{c:.1f} %\ncompliant", ha="center", fontsize=7, color="white")
+ax.set_xticks(range(3)); ax.set_xticklabels(months); ax.set_ylim(0, 10500)
+ax.set_ylabel("trucks weighed per day")
+ax.set_title("Mariakani weighbridge: daily traffic more than tripled (KeNHA via NCTTCA, published)")
+ax.legend(fontsize=8)
+save(fig, "fig-evidence-mariakani.png")
+print("smartport charts written")

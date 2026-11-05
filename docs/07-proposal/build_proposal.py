@@ -32,7 +32,8 @@ from reportlab.platypus.tableofcontents import TableOfContents
 
 HERE = Path(__file__).resolve().parent
 A = HERE / "assets"
-OUT = HERE / "KIFARU-PORTOS-Project-Proposal.pdf"
+OUT = HERE / "KIFARU-PORTOS-Project-Proposal-Judges.pdf"
+port = json.loads((A / "port-results.json").read_text(encoding="utf8"))
 chain = json.loads((A / "chain-results.json").read_text(encoding="utf8"))
 simpy = json.loads((A / "simpy-comparison.json").read_text(encoding="utf8"))
 TODAY = date(2026, 11, 5).strftime("%d %B %Y")
@@ -99,7 +100,7 @@ def on_page(canv, doc):
     canv.saveState()
     canv.setFont("Helvetica", 7.5)
     canv.setFillColor(MUTED)
-    canv.drawString(18 * mm, 10 * mm, "KIFARU PORTOS - Project proposal - RCS v2 port-anchored clearance - all simulation figures are modelled")
+    canv.drawString(18 * mm, 10 * mm, "KIFARU PORTOS - Proposal to the judging panel - simulation figures are modelled; published figures are cited")
     canv.drawRightString(A4[0] - 18 * mm, 10 * mm, f"Page {doc.page}")
     canv.setStrokeColor(LINE)
     canv.line(18 * mm, 14 * mm, A4[0] - 18 * mm, 14 * mm)
@@ -116,17 +117,17 @@ def build():
     s += [Spacer(1, 40 * mm), P("KIFARU PORTOS", ParagraphStyle("c1", parent=H1, fontSize=30, leading=36, alignment=TA_CENTER, textColor=NAVY)),
           P("Kenya Intelligent Freight, Access, Routing and Unified Logistics Platform", ParagraphStyle("c2", parent=BODY, fontSize=12, leading=16, alignment=TA_CENTER, textColor=MUTED)),
           Spacer(1, 10 * mm),
-          P("Project Proposal", ParagraphStyle("c3", parent=H1, fontSize=20, alignment=TA_CENTER, textColor=TEAL)),
+          P("Project Proposal to the Judging Panel", ParagraphStyle("c3", parent=H1, fontSize=20, alignment=TA_CENTER, textColor=TEAL)),
           P("Rolling Clearance System v2: port-anchored clearance for heavy trucks on the Mombasa - Northern Corridor route, with implementation and simulation plan",
             ParagraphStyle("c4", parent=BODY, fontSize=11, leading=15, alignment=TA_CENTER)),
           Spacer(1, 18 * mm)]
     s.append(table(["Item", "Detail"], [
         ["Version", "1.0 (proposal), " + TODAY],
         ["Prepared by", "KIFARU PORTOS project team"],
-        ["Prepared for", "Project sponsors and the agencies consulted: KPA, KRA, KeNHA, NTSA, KenTrade, the weights-and-measures body, the Kenya Transporters Association and candidate loaders"],
+        ["Prepared for", "The judging panel; and, for implementation, KPA, KRA, KeNHA, NTSA, KenTrade, KEBS, the weights-and-measures body, the Kenya Transporters Association and candidate loaders"],
         ["Live platform", LIVE],
         ["Source repository", REPO],
-        ["Status of figures", "All stop shares, truck-hours, fuel and queue figures in this document are produced by models with stated assumptions. None is a measurement. Phase 0-2 replaces them with observed data before any benefit is claimed."],
+        ["Status of figures", "Two kinds of numbers, always labelled: published figures (KPA, KeNHA, NCTTCA, SCEA, KenTrade) are cited with period and source; stop shares, truck-hours, dwell and queue results are modelled from stated assumptions and are not measurements. Phase 0-2 replaces modelled figures with observed data before any benefit is claimed."],
     ], widths=[35 * mm, 135 * mm]))
     s.append(PageBreak())
 
@@ -153,7 +154,7 @@ def build():
     s.append(P("The platform that implements this design is already built in software and running: a FastAPI backend with a deterministic clearance "
                "engine, a clearance registry (tokens, release orders, permits, demerits), a React web application with role dashboards, a public "
                "verification page and a 3D digital twin, a roadside gateway, firmware and hardware designs, and a simulation package. It is deployed "
-               f"at {LIVE} on a hosted PostgreSQL database, with 164 automated tests passing."))
+               f"at {LIVE} on a hosted PostgreSQL database, with 177 automated tests passing."))
     s.append(P("Modelled effect (to be confirmed with field data):", H3))
     s.append(bullets([
         f"At 85 % average loading, static-scale visits by port trucks at the first road station fall from {fmt(pt[85.0]['road_only_static'])} % of trucks under road-only screening to {fmt(pt[85.0]['v2_road_static'])} % with RCS v2, while {fmt(pt[85.0]['v2_port_reweigh'])} % are re-weighed inside the port where cranes and customs are at hand. That is about {fmt(pt[85.0]['truck_hours_saved_per_day'], 0)} truck-hours a day of road queueing removed at 8 000 trucks a day.",
@@ -162,6 +163,22 @@ def build():
         f"No truck over the limit is modelled as cleared without a stop (false-clear rate {chain['defaults']['false_clear_rate'] * 100:.3f} %); real fraud such as plate swaps is handled by audits and token binding, outside the model.",
         "The go/no-go gate set for the simulation phase (road stop share cut by at least 10 points, false clear at most 1 %, port re-weigh volume practical) is met in the model; the gate is re-evaluated on measured data before any hardware spend.",
     ]))
+    pe, ps = port["scenarios"]["existing"], port["scenarios"]["smartport"]
+    s.append(P("SmartPort, the port-side layer, follows every truck through eleven stages from pre-arrival registration to delivery, with the "
+               "data each stage needs, the agency that owns it, and dwell-time KPIs set against published benchmarks. Calibrated to KPA's published "
+               f"2023 truck turnaround of 6.7 hours, the port model shows mean port dwell falling from {pe['avg_dwell_h']:.1f} h to {ps['avg_dwell_h']:.1f} h "
+               f"({port['deltas']['avg_dwell_h_pct']:+.0f} %) and weighbridge service from {pe['weigh_service_min']:.1f} to {ps['weigh_service_min']:.1f} minutes (modelled)."))
+    s.append(P("1.1 At a glance for the judges", H2))
+    s.append(table(["Criterion", "What this proposal shows", "Where"], [
+        ["Problem significance", "The Port of Mombasa handled 45.45 million tonnes in 2025; Mariakani weighed 7,954-9,184 trucks a day in Jul-Sep 2026; import container dwell was 87 h against a 60 h target and Mombasa-Nairobi transit 66 h against 29 h (published, NCTTCA).", "Section 2.4"],
+        ["Innovation", "Weigh once at the first trusted point and honour a signed Load Compliance Token downstream; a rolling verification lane replacing about 25 static lanes; one registry shared by all agencies; every number tagged with its provenance.", "Sections 4, 6.3"],
+        ["Feasibility", "Not a concept: the platform is built, tested (177 automated tests) and live, on a hosted database; legal hooks identified regulation by regulation.", "Sections 5, 6"],
+        ["Impact (modelled)", "Road static-scale stops 23.2 % to 5.3 % for port trucks; first-station static visits 20.8 % to 1.5 % at 90 % token coverage; port dwell -42 %.", "Section 8"],
+        ["Evidence and rigour", "52-entry data register from KPA, KeNHA, NCTTCA, SCEA and KenTrade; Monte Carlo and discrete-event models with replications, sensitivity and a go/no-go gate.", "Sections 2.4, 7, 8"],
+        ["Scalability", "Same token and registry serve every weighbridge on the Northern Corridor and inland depots; cloud platform; agency adapters for KPA, KRA, KenTrade, KEBS, KeNHA, NTSA.", "Sections 6, 9"],
+        ["Sustainability", "Partner model allowed by Reg 3(3); loaders and fleets gain by avoiding stops, fees and detention; staged spend gated on validated results.", "Sections 5, 9.4"],
+        ["Risks", "Named with mitigations: port access, scale approval, origin under-reporting, token fraud, land for lanes, model risk.", "Section 10"],
+    ], widths=[32 * mm, 108 * mm, 30 * mm]))
     s.append(P("Decisions requested: approve the redesign around the port gate-out node and the token; approve Phases 0-2 including the 16-week "
                "simulation and baseline study with a gate before hardware spend; authorise approaches to KPA, KRA, KeNHA, NTSA and the "
                "weights-and-measures body; nominate an executive sponsor and a legal adviser."))
@@ -192,6 +209,26 @@ def build():
                "weak data for enforcement and planning."))
 
     # ------------------------------------------------------------------ 3 objectives
+    s.append(P("2.4 The evidence: what published data shows", H2))
+    s.append(P("Every figure below is published by an agency or the Northern Corridor Transit and Transport Coordination Authority (NCTTCA) "
+               "and is held in the platform's data register with its period, source and classification."))
+    s.append(table(["Indicator", "Value", "Period", "Source"], [
+        ["Port of Mombasa throughput", "45.45 Mt (+10.9 %); 2.11 M TEU, over 35 % empty", "2025", "NCTTCA 21st edition"],
+        ["Containerized import cargo dwell", "106.7 h (target 48 h); 87 h in Jul-Sep 2026 (target 60 h)", "2025; Q3 2026", "NCTTCA"],
+        ["Customs release / after-release", "57 h / 79 h", "2025", "NCTTCA 21st edition"],
+        ["Port truck turnaround", "6.7 h (7.1 h in 2022)", "2023", "KPA annual bulletin"],
+        ["Mariakani trucks weighed per day", "7,954-9,184 (2,501-2,720 a year earlier)", "Jul-Sep 2026", "KeNHA via NCTTCA"],
+        ["Mariakani compliance", "99.1-99.9 %", "Jul-Sep 2026", "KeNHA via NCTTCA"],
+        ["National axle-load compliance", "98.43 % over 10,776 km", "FY 2024/25", "KeNHA Annual Report 2025"],
+        ["Weighbridge crossing time", "about 4 min corridor average; Mariakani 29 min during road works", "2025", "NCTTCA 21st edition (GPS)"],
+        ["Mombasa-Nairobi transit", "66 h over 482 km (target 29 h)", "2025", "NCTTCA 21st edition (RECTS)"],
+        ["Mombasa-Malaba transit", "94 h (target 55 h)", "Jul-Sep 2026", "NCTTCA (URA RECTS)"],
+        ["Agencies issuing permits", "about 26", "2024", "Shippers Council of Eastern Africa"],
+    ], widths=[46 * mm, 62 * mm, 24 * mm, 38 * mm]))
+    s.append(figure("fig-evidence-mariakani.png", "Figure A. Mariakani daily weighed traffic more than tripled year on year while compliance stayed near 99 % (published)."))
+    s.append(P("Reading it: almost every truck is compliant, yet every truck is weighed again at every station, and the port and corridor run well "
+               "above their dwell and transit targets. The opportunity is to stop re-checking compliant trucks and to move checks to where they are cheapest."))
+
     s.append(P("3. Objectives", H1))
     s.append(P("Main objective: remove repeat stops for compliant heavy trucks on the corridor by weighing each truck once at its first trusted point "
                "and honouring that result downstream, while keeping the static scale and the authorised officer as the legal reference for overloads."))
@@ -266,6 +303,27 @@ def build():
     ], widths=[48 * mm, 62 * mm, 60 * mm]))
 
     # ------------------------------------------------------------------ 5 legal
+    s.append(P("4.7 SmartPort: the eleven-stage port visit", H2))
+    s.append(P("RCS v2 decides what happens on the road; SmartPort organises everything before it. One port-visit record follows each truck "
+               "and checks that each stage carries the data it needs before the next can start. Stage 7 is the port gate-out weigh node: when a "
+               "loaded truck crosses it, the visit records gross and net weight, the discrepancy against the declared weight and the token, with no manual entry."))
+    s.append(table(["#", "Stage", "Key data captured", "Owner"], [
+        ["1", "Pre-arrival registration and scheduling", "Truck, driver, container, cargo type, declared weight, destination, appointment", "Transporter, clearing agent"],
+        ["2", "Customs clearance and document verification", "Declaration, bill of lading, duty, inspection and permit status, hold reason", "KRA, KenTrade, KEBS"],
+        ["3", "Arrival and identification", "ANPR plate, RFID tag, appointment validity, queue position and wait", "KPA"],
+        ["4", "Gate-in and security", "Gate, access authorisation, vehicle inspection, driver verification, processing time", "KPA"],
+        ["5", "Yard allocation", "Terminal, block, container position, loading instruction, yard wait", "KPA"],
+        ["6", "Cargo verification and loading", "Equipment, seal, match against documents, condition, loading time", "KPA"],
+        ["7", "Automated weighing", "Gross, tare, net, axle loads, discrepancy, calibration, Load Compliance Token", "KPA, KeNHA"],
+        ["8", "Final clearance", "Release status, delivery order, gate pass, payment", "KPA, KRA"],
+        ["9", "Gate-out", "Exit gate, cargo verified, exit authorised, port dwell time", "KPA"],
+        ["10", "Inland transport", "Route, distance, ETA, stoppages, delay reason", "Transporter, KeNHA"],
+        ["11", "Delivery and trip closure", "Arrival, proof of delivery, total transit time", "Cargo owner"],
+    ], widths=[8 * mm, 48 * mm, 82 * mm, 32 * mm]))
+    s.append(P("Agencies keep their own systems: KPA (port operations), KRA (customs), KenTrade (TradeNet single window), KeNHA (axle loads), "
+               "NTSA (vehicle registration and roadworthiness) and KEBS (product standards). SmartPort complements them through authorised "
+               "adapters and a shared dashboard, so each agency sees release, weighing and location status without re-keying documents."))
+
     s.append(P("5. Legal and regulatory basis", H1))
     s.append(P("The EAC Vehicle Load Control (Enforcement Measures) Regulations, 2018 set the rules. The platform encodes them as configuration "
                "flagged for verification, never as assumptions buried in code."))
@@ -319,6 +377,12 @@ def build():
                "accuracy and latency targets remain targets until measured."))
 
     # ------------------------------------------------------------------ 7 simulation methodology
+    s.append(P("6.3 Data provenance", H2))
+    s.append(P("Every parameter carries one of four classes: actual (operational records), published (agency or NCTTCA reports), estimated "
+               "(design assumptions) or simulated (model output). The register currently holds 52 entries; the port gate service times and "
+               "gate-side truck volumes are estimated because they are not published, and are first in line for replacement with KPA gate logs. "
+               "The web platform shows the class beside every figure, and simulated records are never displayed as live."))
+
     s.append(P("7. Simulation methodology", H1))
     s.append(P("7.1 Questions the simulation answers", H2))
     s.append(bullets(["How many stops and how much delay does each design remove?", "How accurate must the port and road scales be?",
@@ -425,7 +489,18 @@ def build():
                "as designed.", SMALL))
     s.append(figure("fig-simpy-scenarios.png", "Figure 7. Share of trucks stopped at the static scale and share rolling through the verification lane, by scenario (modelled)."))
     s.append(figure("fig-simpy-queue.png", "Figure 8. Mean static-scale queue through the day: all-stop baseline, rolling clearance, RCS v2 with 90 % token coverage (modelled)."))
-    s.append(P("8.7 Not yet counted", H2))
+    s.append(P("8.7 Port process: existing operations vs SmartPort", H2))
+    s.append(P(f"A discrete-event model of stages 3-11 (gates, yard, loading, weighing, clearance with document holds, gate-out, inland transit), "
+               f"{port['inputs']['reps']} replications. {port['calibration_note']}"))
+    keys = [("avg_dwell_h", "Mean port dwell (h)"), ("p90_dwell_h", "P90 port dwell (h)"), ("avg_wait_min", "Queue waiting per truck (min)"),
+            ("weigh_service_min", "Weighbridge service (min)"), ("throughput_per_hour", "Gate-out throughput (trucks/h)"),
+            ("gate_in_utilisation", "Gate-in utilisation"), ("weigh_utilisation", "Weighbridge utilisation")]
+    s.append(table(["KPI", "Existing", "SmartPort", "Change"],
+                   [[lab, fmt(pe[k], 2), fmt(ps[k], 2), f"{port['deltas'][k + '_pct']:+.0f} %"] for k, lab in keys], widths=[70 * mm, 30 * mm, 30 * mm, 40 * mm]))
+    s.append(figure("fig-port-sim.png", "Figure 9. Port visit KPIs with the KPA 2023 truck-turnaround benchmark (modelled)."))
+    s.append(bullets([a for a in port["assumptions"]], SMALL))
+
+    s.append(P("8.8 Not yet counted", H2))
     s.append(P("Time saved from removed duplicate checks at port entry, loading and exit; fees and detention avoided by transporters; customs benefits from "
                "catching weight misdeclaration; fuel and emissions from avoided idling (the platform's environmental model labels these modelled). The "
                "baseline study must time each duplicate check before these are claimed."))
@@ -541,6 +616,14 @@ def build():
         ["Arrivals", "8 000 trucks a day; peak factor 1.5; bursts after vessel discharge", "KPA and KeNHA logs"],
     ], widths=[60 * mm, 55 * mm, 55 * mm]))
     s.append(P("Appendix D. Sources", H1))
+    s.append(bullets([
+        "NCTTCA, 21st Edition Northern Corridor Transport Observatory Report, April 2026 (2025 data): top.ttcanc.org/uploads/attachments/cmownhhl201qpfmqhl5ikzprd-en-21-top-report.pdf",
+        "NCTTCA, Quarterly Performance Report July-September 2026: top.ttcanc.org/uploads/attachments/cmvo7m7gv00qfwznu9zlgz9zh-quarterly-report-july-to-september-2026.pdf",
+        "KeNHA Annual Report 2025: kenha.co.ke/wp-content/uploads/2026/06/KeNHA-ANNUAL-REPORT-2025-WEB-VERSION.pdf",
+        "KPA annual bulletins via Kenya News Agency and The Star (2023 truck turnaround 6.7 h; 2024 throughput and ship times).",
+        "Shippers Council of Eastern Africa (dwell history, permit agencies); KenTrade single window reports (agencies connected, document reduction).",
+        "Full list with URLs and periods: docs/06-operations/data-register.md and the live Data register page.",
+    ]))
     s.append(bullets([
         "EAC Vehicle Load Control (Enforcement Measures) Regulations, 2018 (full text, bdears.busitema.ac.ug).",
         "Process guide supplied by the project owner covering ship arrival, customs, port release, truck exit and weighbridges, citing KRA, KPA, KeNHA, InfoTrade Kenya and the Kenya Transporters Association; reported gross limits and 2026 events not independently re-verified.",
