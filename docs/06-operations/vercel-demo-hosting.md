@@ -1,4 +1,6 @@
-# Vercel demo hosting (live: https://kifaru-portos.vercel.app)
+# Vercel hosting (live: https://kifaru-portos-1-0.vercel.app)
+
+Current deployment: Vercel project `kifaru-portos-1-0` (team `jrsnr`), git-connected to `main` of github.com/Jrjunior-mk/KIFARU-PORTOS-1.0, database on Supabase (`supabase-postgres.md`). Environment variables are created with `apps/api/scripts/vercel_env_setup.py`. The earlier `kifaru-portos.vercel.app` deployment is superseded.
 
 The Vercel deployment is a **demo configuration**, not the production architecture (which is AWS ECS + RDS + IoT Core,
 see `docs/02-architecture/cloud-architecture.md` and `docs/06-operations/deployment-guide.md`). It exists so the

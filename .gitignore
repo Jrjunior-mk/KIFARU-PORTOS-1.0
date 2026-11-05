@@ -22,3 +22,6 @@ apps/api/seed_accounts.json
 .vercel
 .env*
 *.db.bak*
+
+.vercel
+.env*

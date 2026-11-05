@@ -6,18 +6,22 @@ import { Badge, Card, Empty, ErrorBanner, Field, Notice, PageHeader, Spinner, Ta
 import { eventSource, useLiveEvents } from '../hooks/useLiveEvents';
 import { useMutation, useQuery } from '../hooks/useQuery';
 import { fmtDuration, fmtNum, fmtPct, fmtTime } from '../lib/format';
-import Scene, { type TwinIncident, type TwinStation, type TwinTruck } from '../twin/Scene';
+import Scene, { type TwinIncident, type TwinRoute, type TwinStation, type TwinTruck } from '../twin/Scene';
 
-const TWIN_TYPES = ['truck.detected', 'clearance.decided', 'queue.updated', 'incident.opened', 'station.failure'];
+const TWIN_TYPES = ['clearance.decided', 'queue.updated', 'incident.opened', 'station.failure'];
+const SPEEDS = [0.5, 1, 2, 4];
+const ROUTES: TwinRoute[] = ['continue', 'verification_lane', 'static_scale', 'port_reweigh', 'hold'];
 const MULTIPLIERS = [1, 1.2, 1.3, 1.5];
 
 export default function Twin() {
   const { hasRole } = useAuth();
   const stationsQ = useQuery(() => stationsApi.list(), [], { pollMs: 30_000 });
   const incidentsQ = useQuery(() => adminApi.incidents('open'), [], { pollMs: 60_000 });
-  const [trucks, setTrucks] = useState<TwinTruck[]>([]);
+  const [queue, setQueue] = useState<TwinTruck[]>([]); // decided trucks waiting to enter the scene, in arrival order
+  const [inScene, setInScene] = useState(0);
+  const [speed, setSpeed] = useState(1);
   const stations = stationsQ.data ?? [];
-  const twinStations = useMemo<TwinStation[]>(() => stations.slice(0, 2).map((s, i) => ({ id: s.id, code: s.code, name: s.name, status: s.status, queue_len: s.queue_len, x: i, laneIds: s.lanes.map((l) => l.id) })), [stations]);
+  const twinStations = useMemo<TwinStation[]>(() => stations.slice(0, 2).map((s, i) => ({ id: s.id, code: s.code, name: s.name, status: s.status, queue_len: s.queue_len, x: i, laneIds: s.lanes.map((l) => l.id), hasLane: s.lanes.some((l) => l.type === 'rolling_verification' && l.status !== 'offline') })), [stations]);
   const stationIdx = useCallback((stationId: string | null, laneId?: string | null) => {
     let i = twinStations.findIndex((s) => s.id === stationId);
     if (i < 0 && laneId) i = twinStations.findIndex((s) => s.laneIds.includes(laneId));
@@ -26,21 +30,18 @@ export default function Twin() {
   const stationsRef = useRef(stationIdx); stationsRef.current = stationIdx;
 
   const onEvent = useCallback((ev: LiveEvent) => {
-    const p = ev.payload as { lane_id?: string; decision?: Decision; plate?: string | null; weighing_event_id?: string };
-    if (ev.type === 'truck.detected') {
-      setTrucks((ts) => [...ts.slice(-40), { id: ev.event_id, laneId: p.lane_id ?? null, stationIdx: stationsRef.current(ev.station_id, p.lane_id), decision: null, plate: null, spawnedAt: Date.now(), source: eventSource(ev) }]);
-    } else if (ev.type === 'clearance.decided') {
-      setTrucks((ts) => {
-        const i = ts.findIndex((t) => t.decision === null && t.laneId === (p.lane_id ?? null));
-        if (i >= 0) { const next = ts.slice(); next[i] = { ...next[i], decision: p.decision ?? null, plate: p.plate ?? null, source: eventSource(ev) }; return next; }
-        return [...ts.slice(-40), { id: ev.event_id, laneId: p.lane_id ?? null, stationIdx: stationsRef.current(ev.station_id, p.lane_id), decision: p.decision ?? null, plate: p.plate ?? null, spawnedAt: Date.now(), source: eventSource(ev) }];
-      });
+    const p = ev.payload as { lane_id?: string; decision?: Decision; plate?: string | null; weighing_event_id?: string; route?: string };
+    if (ev.type === 'clearance.decided') {
+      // one entry per decided pass, in the order decisions arrive; the scene releases them one at a time
+      const route = (ROUTES as string[]).includes(p.route ?? '') ? (p.route as TwinRoute) : p.decision === 'GREEN' ? 'continue' : p.decision === 'RED' ? 'hold' : 'verification_lane';
+      setQueue((q) => (q.some((t) => t.id === ev.event_id) ? q : [...q.slice(-120), { id: ev.event_id, laneId: p.lane_id ?? null, stationIdx: stationsRef.current(ev.station_id, p.lane_id), decision: p.decision ?? null, route, plate: p.plate ?? null, spawnedAt: Date.now(), source: eventSource(ev) }]));
     } else if (ev.type === 'queue.updated' || ev.type === 'station.failure') { void stationsQ.refetch(); if (ev.type === 'station.failure') void incidentsQ.refetch(); }
     else if (ev.type === 'incident.opened') void incidentsQ.refetch();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const live = useLiveEvents(TWIN_TYPES, null, 200, onEvent);
-  const onTruckDone = useCallback((id: string) => setTrucks((ts) => ts.filter((t) => t.id !== id)), []);
+  const onSpawned = useCallback((id: string) => setQueue((q) => q.filter((t) => t.id !== id)), []);
+  const onActiveChange = useCallback((n: number) => setInScene(n), []);
   const incidents = useMemo<TwinIncident[]>(() => (incidentsQ.data ?? []).map((i) => { const idx = twinStations.findIndex((s) => s.id === i.station_id); return { id: i.id, stationIdx: idx >= 0 ? idx : null, severity: i.severity, title: i.title }; }), [incidentsQ.data, twinStations]);
   const decidedCount = live.events.filter((e) => e.type === 'clearance.decided').length;
 
@@ -49,24 +50,24 @@ export default function Twin() {
       <PageHeader eyebrow="Analysis" title="Digital twin" subtitle="3D port and station scene driven by live events; the banner below states whether any event carried source=live." />
       <div role="status" className={`flex flex-wrap items-center justify-between gap-2 rounded-lg px-4 py-2 text-sm font-semibold ${live.hasLive ? 'bg-brand-600 text-white' : 'bg-amber-500 text-slate-950'}`}>
         <span>{live.hasLive ? 'LIVE — events carry source=live from station gateways' : 'SIMULATION MODE — data is simulated (no event with source=live has been received)'}</span>
-        <span className="text-xs font-normal">WS {live.status} · {decidedCount} decisions this session · {trucks.length} trucks in scene · {twinStations.map((s) => `${s.code} q${s.queue_len}`).join(' · ')}</span>
+        <span className="flex flex-wrap items-center gap-2 text-xs font-normal">WS {live.status} · {decidedCount} decisions this session · {inScene} in scene · {queue.length} waiting to enter · {twinStations.map((s) => `${s.code} q${s.queue_len}`).join(' · ')}
+          <label className="ml-2 inline-flex items-center gap-1">speed<select aria-label="Playback speed" className="rounded border border-slate-300 bg-white px-1 py-0.5 text-xs text-slate-900" value={speed} onChange={(e) => setSpeed(Number(e.target.value))}>{SPEEDS.map((v) => <option key={v} value={v}>{v}×</option>)}</select></label></span>
       </div>
       <ErrorBanner error={stationsQ.error} />
       <div className="grid gap-3 xl:grid-cols-4">
         <div className="card overflow-hidden xl:col-span-3" style={{ height: 'min(70vh, 640px)' }} aria-label="3D digital twin of the port and weighing stations">
-          {twinStations.length === 0 ? <div className="p-6"><Spinner label="Loading stations" /></div> : <Scene stations={twinStations} trucks={trucks} incidents={incidents} onTruckDone={onTruckDone} />}
+          {twinStations.length === 0 ? <div className="p-6"><Spinner label="Loading stations" /></div> : <Scene stations={twinStations} queue={queue} incidents={incidents} speed={speed} onSpawned={onSpawned} onActiveChange={onActiveChange} />}
         </div>
         <div className="space-y-3">
           <Card title="Legend">
             <ul className="space-y-1 text-xs">
-              <li><span className="mr-2 inline-block h-3 w-3 rounded bg-slate-400" />Truck detected, awaiting decision</li>
-              <li><span className="mr-2 inline-block h-3 w-3 rounded bg-decision-green" />GREEN — continues without stopping</li>
-              <li><span className="mr-2 inline-block h-3 w-3 rounded bg-decision-amber" />AMBER — diverts to the static scale</li>
-              <li><span className="mr-2 inline-block h-3 w-3 rounded bg-decision-red" />RED — diverts to inspection/holding</li>
-              <li><span className="mr-2 inline-block h-3 w-3 rounded bg-slate-400 opacity-50" />Ghost trucks = observed queue length</li>
+              <li><span className="mr-2 inline-block h-3 w-3 rounded bg-decision-green" />GREEN — continues on the mainline without stopping</li>
+              <li><span className="mr-2 inline-block h-3 w-3 rounded bg-decision-amber" />AMBER — rolls through the verification lane at ~10 km/h (or stops at the static scale where no lane exists)</li>
+              <li><span className="mr-2 inline-block h-3 w-3 rounded bg-decision-red" />RED — stops at the static scale, then the inspection / holding bay, then leaves after release</li>
+              <li><span className="mr-2 inline-block h-3 w-3 rounded bg-slate-400 opacity-50" />Ghost trucks = observed static-scale queue</li>
               <li>⚠ cone = open incident at the station</li>
             </ul>
-            <p className="mt-2 text-[11px] text-slate-500">Scene shows the first two stations ({twinStations.map((s) => s.code).join(', ')}). Drag to orbit, wheel to zoom.</p>
+            <p className="mt-2 text-[11px] text-slate-500">Trucks enter one at a time in the order their decisions arrive, keep a safe gap behind the truck ahead, drive the whole approach from the port end and split at the station by route. Scene shows the first two stations ({twinStations.map((s) => s.code).join(', ')}). Drag to orbit, wheel to zoom.</p>
           </Card>
           <Card title="Recent events">
             {live.events.length === 0 ? <Empty>No events yet</Empty> : (
